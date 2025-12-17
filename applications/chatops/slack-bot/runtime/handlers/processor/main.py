@@ -198,7 +198,7 @@ def generate_cost_report(parameters: Dict[str, Any]) -> Dict[str, Any]:
     
     # Fetch API key for cost API (if using external service)
     try:
-        api_key = get_api_key()
+        get_api_key()
         log('INFO', "API key retrieved successfully")
     except Exception as e:
         log('ERROR', f"Failed to retrieve API key: {e}")
