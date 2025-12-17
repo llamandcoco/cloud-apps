@@ -74,13 +74,7 @@ export class SlackBotStack extends cdk.Stack {
       resources: [
         // Application-specific parameter path
         `arn:aws:ssm:${this.region}:${this.account}:parameter/slack-bot/${envName}/*`
-      ],
-      conditions: {
-        // Additional security: require encryption
-        StringEquals: {
-          'ssm:Decrypt': 'true'
-        }
-      }
+      ]
     });
 
     // ========================================================================
