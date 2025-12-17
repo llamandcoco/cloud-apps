@@ -201,7 +201,9 @@ interface Intent {
 function parseCommand(body: string): Intent {
   const params = new URLSearchParams(body);
 
+  // reserved for future routing / audit
   const command = params.get('command') || '';
+  void command;
   const text = params.get('text') || '';
   const userId = params.get('user_id') || 'unknown';
   const responseUrl = params.get('response_url') || undefined;
