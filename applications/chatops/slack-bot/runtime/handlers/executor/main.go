@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 
 var (
 	environment = getEnv("ENVIRONMENT", "staging")
-	logLevel    = getEnv("LOG_LEVEL", "info")
+	logLevel    = strings.ToUpper(getEnv("LOG_LEVEL", "INFO"))
 )
 
 // ============================================================================
@@ -105,9 +106,17 @@ func (sc *SecretCache) Set(key, value string) {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
+	// Clean up expired entries while we have the write lock
+	now := time.Now()
+	for k, cached := range sc.cache {
+		if now.After(cached.expiresAt) {
+			delete(sc.cache, k)
+		}
+	}
+
 	sc.cache[key] = &cachedSecret{
 		value:     value,
-		expiresAt: time.Now().Add(sc.ttl),
+		expiresAt: now.Add(sc.ttl),
 	}
 }
 

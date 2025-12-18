@@ -227,12 +227,12 @@ npx cdk deploy -c environment=production
 # Verify deployment
 aws cloudformation describe-stacks --stack-name MyAppStack-production
 
-# Monitor for errors
+# Monitor for errors (last 10 minutes)
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
   --metric-name Errors \
   --dimensions Name=FunctionName,Value=app-production-function \
-  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --start-time $(date -u -v-10M +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period 60 \
   --statistics Sum

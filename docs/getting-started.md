@@ -340,15 +340,19 @@ View in AWS Console or:
 # Logs
 aws logs tail /aws/lambda/function-name --follow
 
-# Metrics
+# Metrics (last 24 hours)
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
   --metric-name Errors \
   --dimensions Name=FunctionName,Value=function-name \
-  --start-time 2024-01-01T00:00:00Z \
-  --end-time 2024-01-01T23:59:59Z \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
   --period 3600 \
   --statistics Sum
+
+# Or use absolute timestamps (cross-platform):
+# --start-time 2024-01-01T00:00:00Z \
+# --end-time 2024-01-01T23:59:59Z \
 ```
 
 ## Troubleshooting

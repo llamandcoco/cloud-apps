@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 
 /**
  * Slack Command Handler (Node.js)
@@ -225,7 +225,7 @@ function parseCommand(body: string): Intent {
   });
 
   return {
-    id: `intent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: `intent-${randomUUID()}`,
     operation,
     parameters,
     requestedBy: userId,
