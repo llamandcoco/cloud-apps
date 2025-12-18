@@ -202,8 +202,7 @@ function parseCommand(body: string): Intent {
   const params = new URLSearchParams(body);
 
   // reserved for future routing / audit
-  const command = params.get('command') || '';
-  void command;
+  const _command = params.get('command') || '';
   const text = params.get('text') || '';
   const userId = params.get('user_id') || 'unknown';
   const responseUrl = params.get('response_url') || undefined;
