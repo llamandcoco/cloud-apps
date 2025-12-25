@@ -37,6 +37,8 @@ lerna-debug.log*
 *.js.map
 *.d.ts
 !jest.config.js
+!jest.integration.config.js
+!.eslintrc.js
 dist/
 build/
 
@@ -129,3 +131,5 @@ coverage/
 tmp/
 temp/
 .cache/
+*.tmp
+.s3-version-id-*.tmp
