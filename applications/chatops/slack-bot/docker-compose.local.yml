@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # LocalStack - AWS services emulator
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"  # LocalStack gateway
+      - "4510-4559:4510-4559"  # External services
+    environment:
+      - SERVICES=sqs,ssm,events,lambda
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack-init:/etc/localstack/init/ready.d"
+    networks:
+      - slack-bot-local
+
+  # Slack bot local server
+  slack-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    ports:
+      - "3000:3000"
+    environment:
+      - ENVIRONMENT=local
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_REGION=ca-central-1
+      - LOG_LEVEL=debug
+    env_file:
+      - .env.local
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    depends_on:
+      - localstack
+    networks:
+      - slack-bot-local
+
+networks:
+  slack-bot-local:
+    driver: bridge
