@@ -1,45 +1,33 @@
 # Dependencies
 node_modules/
-*.pyc
-__pycache__/
-*.egg-info/
-dist/
+package-lock.json
+
+# Build outputs
 build/
+dist/
 
-# CDK
-cdk.out/
-.cdk.staging/
-*.js
-*.d.ts
-!jest.config.js
+# Test coverage
+coverage/
 
-# Go
-bootstrap
-*.exe
-*.test
-*.out
-vendor/
+# Environment files
+.env
+.env.local
+.env.*.local
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-.DS_Store
+*~
 
-# Secrets - NEVER COMMIT
-.env
-.env.local
-*.pem
-*.key
-credentials.json
-service-account*.json
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# OS
-Thumbs.db
+# TypeScript
+*.tsbuildinfo
