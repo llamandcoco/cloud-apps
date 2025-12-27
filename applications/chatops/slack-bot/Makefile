@@ -62,7 +62,8 @@ help:
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
 	@echo "  make test-integration       - Run integration tests"
-	@echo "  make test-echo-worker       - Test echo worker specifically"
+	@echo "  make test-router-lambda     - Test router lambda integration"
+	@echo "  make test-echo-worker       - Test echo worker integration"
 	@echo ""
 	@echo "$(GREEN)Utilities:$(NC)"
 	@echo "  make clean                  - Clean build artifacts"
@@ -244,6 +245,11 @@ test-integration:
 	@echo "$(BLUE)Running integration tests...$(NC)"
 	cd $(SANDBOX_ROOT)/tests/integration && \
 		./test-localstack.sh
+
+test-router-lambda:
+	@echo "$(BLUE)Testing router lambda integration...$(NC)"
+	cd $(SANDBOX_ROOT)/tests/integration && \
+		./test-router-lambda.sh
 
 test-echo-worker:
 	@echo "$(BLUE)Testing echo worker integration...$(NC)"
