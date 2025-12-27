@@ -37,18 +37,27 @@ help:
 	@echo ""
 	@echo "$(GREEN)Build:$(NC)"
 	@echo "  make build                  - Build all Lambda functions"
+	@echo "  make build-router           - Build router only"
 	@echo "  make build-echo             - Build echo worker only"
 	@echo ""
 	@echo "$(GREEN)Upload to S3:$(NC)"
+	@echo "  make upload-router          - Upload router (auto-build)"
 	@echo "  make upload-echo            - Upload echo worker (auto-build)"
 	@echo "  make upload-deploy          - Upload deploy worker"
 	@echo "  make upload-status          - Upload status worker"
 	@echo "  make upload-all             - Upload all workers"
 	@echo ""
-	@echo "$(GREEN)Deploy Lambda:$(NC)"
-	@echo "  make deploy-echo            - Deploy echo worker from S3"
-	@echo "  make deploy-deploy          - Deploy deploy worker from S3"
-	@echo "  make deploy-status          - Deploy status worker from S3"
+	@echo "$(GREEN)Deploy Lambda (Local):$(NC)"
+	@echo "  make deploy-router          - Deploy router from local build"
+	@echo "  make deploy-echo            - Deploy echo worker from local build"
+	@echo "  make deploy-deploy          - Deploy deploy worker from local build"
+	@echo "  make deploy-status          - Deploy status worker from local build"
+	@echo ""
+	@echo "$(GREEN)Deploy Lambda (S3):$(NC)"
+	@echo "  make deploy-router-s3       - Deploy router from S3"
+	@echo "  make deploy-echo-s3         - Deploy echo worker from S3"
+	@echo "  make deploy-deploy-s3       - Deploy deploy worker from S3"
+	@echo "  make deploy-status-s3       - Deploy status worker from S3"
 	@echo ""
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
@@ -95,6 +104,12 @@ build:
 	npm run package
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
+build-router:
+	@echo "$(BLUE)Building router...$(NC)"
+	npm run build
+	npm run package
+	@echo "$(GREEN)✓ Router built$(NC)"
+
 build-echo:
 	@echo "$(BLUE)Building echo worker...$(NC)"
 	npm run build
@@ -117,6 +132,13 @@ build-status:
 # Upload to S3
 # -----------------------------------------------------------------------------
 
+upload-router: build-router verify-aws
+	@echo "$(BLUE)Uploading router to S3...$(NC)"
+	@UPLOAD_OUTPUT=$$($(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
+		$(SCRIPTS_DIR)/upload-lambda.sh router $(ENVIRONMENT) $(VERSION)); \
+	echo "$$UPLOAD_OUTPUT"; \
+	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-router.tmp
+
 upload-echo: build-echo verify-aws
 	@echo "$(BLUE)Uploading echo worker to S3...$(NC)"
 	@UPLOAD_OUTPUT=$$($(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
@@ -134,14 +156,38 @@ upload-status: build-status verify-aws
 	$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
 		$(SCRIPTS_DIR)/upload-lambda.sh status $(ENVIRONMENT) $(VERSION)
 
-upload-all: upload-echo upload-deploy upload-status
-	@echo "$(GREEN)✓ All workers uploaded$(NC)"
+upload-all: upload-router upload-echo upload-deploy upload-status
+	@echo "$(GREEN)✓ All components uploaded$(NC)"
 
 # -----------------------------------------------------------------------------
 # Deploy Lambda
 # -----------------------------------------------------------------------------
 
-deploy-echo: upload-echo
+deploy-router: build-router
+	@echo "$(BLUE)Deploying router lambda from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/slack-router-lambda && terragrunt apply
+	@echo "$(GREEN)✓ Router lambda deployed$(NC)"
+
+deploy-router-s3: upload-router
+	@echo "$(BLUE)Deploying router lambda from S3...$(NC)"
+	@if [ -f .s3-version-id-router.tmp ]; then \
+		S3_VERSION_ID=$$(cat .s3-version-id-router.tmp); \
+		echo "Using S3 Version ID: $$S3_VERSION_ID"; \
+		cd $(SANDBOX_ROOT)/slack-router-lambda && \
+		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) S3_OBJECT_VERSION=$$S3_VERSION_ID terragrunt apply; \
+	else \
+		echo "$(YELLOW)Warning: Version ID not found, deploying without it$(NC)"; \
+		cd $(SANDBOX_ROOT)/slack-router-lambda && \
+		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
+	fi
+	@echo "$(GREEN)✓ Router lambda deployed from S3$(NC)"
+
+deploy-echo: build-echo
+	@echo "$(BLUE)Deploying echo worker from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-echo-worker && terragrunt apply
+	@echo "$(GREEN)✓ Echo worker deployed$(NC)"
+
+deploy-echo-s3: upload-echo
 	@echo "$(BLUE)Deploying echo worker from S3...$(NC)"
 	@if [ -f .s3-version-id-echo.tmp ]; then \
 		S3_VERSION_ID=$$(cat .s3-version-id-echo.tmp); \
@@ -153,19 +199,29 @@ deploy-echo: upload-echo
 		cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
 	fi
-	@echo "$(GREEN)✓ Echo worker deployed$(NC)"
+	@echo "$(GREEN)✓ Echo worker deployed from S3$(NC)"
 
-deploy-deploy: upload-deploy
+deploy-deploy: build-deploy
+	@echo "$(BLUE)Deploying deploy worker from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-deploy-worker && terragrunt apply
+	@echo "$(GREEN)✓ Deploy worker deployed$(NC)"
+
+deploy-deploy-s3: upload-deploy
 	@echo "$(BLUE)Deploying deploy worker from S3...$(NC)"
 	cd $(SANDBOX_ROOT)/chatbot-deploy-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
-	@echo "$(GREEN)✓ Deploy worker deployed$(NC)"
+	@echo "$(GREEN)✓ Deploy worker deployed from S3$(NC)"
 
-deploy-status: upload-status
+deploy-status: build-status
+	@echo "$(BLUE)Deploying status worker from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-status-worker && terragrunt apply
+	@echo "$(GREEN)✓ Status worker deployed$(NC)"
+
+deploy-status-s3: upload-status
 	@echo "$(BLUE)Deploying status worker from S3...$(NC)"
 	cd $(SANDBOX_ROOT)/chatbot-status-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
-	@echo "$(GREEN)✓ Status worker deployed$(NC)"
+	@echo "$(GREEN)✓ Status worker deployed from S3$(NC)"
 
 # -----------------------------------------------------------------------------
 # Quick Deploy (upload + deploy in one command)
