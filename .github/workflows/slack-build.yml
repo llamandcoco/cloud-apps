@@ -1,0 +1,348 @@
+# =============================================================================
+# Slack /build Command - GitHub Actions Workflow
+# =============================================================================
+# Triggered by Slack /build command via repository_dispatch
+# Builds Lambda functions and uploads artifacts to S3
+#
+# Usage from Slack:
+#   /build router
+#   /build echo
+#   /build all
+# =============================================================================
+
+name: Slack Build Command
+
+on:
+  repository_dispatch:
+    types: [slack-build]
+
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to build (router, echo, deploy, status, all)'
+        required: true
+        default: 'all'
+      environment:
+        description: 'Target environment (plt, dev, prod)'
+        required: true
+        default: 'plt'
+      response_url:
+        description: 'Slack response URL (leave empty for manual runs)'
+        required: false
+
+permissions:
+  id-token: write   # Required for OIDC authentication
+  contents: read
+
+env:
+  WORKING_DIR: applications/chatops/slack-bot
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout code
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Setup Node.js
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIR }}/package-lock.json
+
+      # -----------------------------------------------------------------------
+      # 3. Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 4. Run tests
+      # -----------------------------------------------------------------------
+      - name: Run tests
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm test
+
+      # -----------------------------------------------------------------------
+      # 5. Run linter
+      # -----------------------------------------------------------------------
+      - name: Run linter
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run lint
+
+      # -----------------------------------------------------------------------
+      # 6. Type check
+      # -----------------------------------------------------------------------
+      - name: Type check
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run type-check
+
+      # -----------------------------------------------------------------------
+      # 7. Build TypeScript
+      # -----------------------------------------------------------------------
+      - name: Build
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run build
+
+      # -----------------------------------------------------------------------
+      # 8. Package Lambda functions
+      # -----------------------------------------------------------------------
+      - name: Package Lambda functions
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run package
+
+      # -----------------------------------------------------------------------
+      # 9. Configure AWS Credentials (OIDC - no secrets!)
+      # -----------------------------------------------------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ACTIONS_DEPLOY_ROLE_ARN }}
+          aws-region: ca-central-1
+          role-session-name: GitHubActions-Build-${{ github.run_id }}
+
+      # -----------------------------------------------------------------------
+      # 10. Verify AWS access
+      # -----------------------------------------------------------------------
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
+      # -----------------------------------------------------------------------
+      # 11. Upload artifacts to S3
+      # -----------------------------------------------------------------------
+      - name: Upload to S3
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          COMPONENT: ${{ github.event.inputs.component || github.event.client_payload.component || 'all' }}
+          ENVIRONMENT: ${{ github.event.inputs.environment || github.event.client_payload.environment || 'plt' }}
+          VERSION: ${{ github.sha }}
+        run: |
+          SHORT_SHA=${VERSION:0:7}
+
+          echo "📦 Uploading Lambda artifacts..."
+          echo "Component: $COMPONENT"
+          echo "Environment: $ENVIRONMENT"
+          echo "Version: $SHORT_SHA"
+          echo ""
+
+          # Determine which components to upload
+          if [ "$COMPONENT" == "all" ]; then
+            COMPONENTS=("router" "echo" "deploy" "status")
+          else
+            COMPONENTS=("$COMPONENT")
+          fi
+
+          # Upload each component
+          for comp in "${COMPONENTS[@]}"; do
+            echo "📤 Uploading ${comp}..."
+
+            # Determine the zip file name
+            if [ "$comp" == "router" ]; then
+              ZIP_FILE="router.zip"
+            else
+              ZIP_FILE="${comp}-worker.zip"
+            fi
+
+            if [ ! -f "dist/${ZIP_FILE}" ]; then
+              echo "⚠️  Skipping ${comp} - dist/${ZIP_FILE} not found"
+              continue
+            fi
+
+            S3_BUCKET="laco-${ENVIRONMENT}-lambda-artifacts"
+            S3_PREFIX="${ENVIRONMENT}/${comp}/builds"
+
+            # Get file info
+            FILE_SIZE=$(stat -c%s "dist/${ZIP_FILE}" 2>/dev/null || stat -f%z "dist/${ZIP_FILE}")
+            FILE_HASH=$(sha256sum "dist/${ZIP_FILE}" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "dist/${ZIP_FILE}" | cut -d' ' -f1)
+
+            # Upload versioned artifact
+            echo "  → s3://${S3_BUCKET}/${S3_PREFIX}/${SHORT_SHA}.zip"
+            aws s3 cp "dist/${ZIP_FILE}" \
+              "s3://${S3_BUCKET}/${S3_PREFIX}/${SHORT_SHA}.zip" \
+              --metadata "git-commit=${VERSION},build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ),checksum=${FILE_HASH},github-run=${GITHUB_RUN_ID}"
+
+            # Create metadata JSON
+            cat > "/tmp/${comp}-metadata.json" <<EOF
+          {
+            "component": "${comp}",
+            "version": "${SHORT_SHA}",
+            "git": {
+              "commit": "${VERSION}",
+              "short_commit": "${SHORT_SHA}",
+              "branch": "${GITHUB_REF_NAME}",
+              "author": "${GITHUB_ACTOR}",
+              "repository": "${GITHUB_REPOSITORY}"
+            },
+            "build": {
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "workflow": "${GITHUB_WORKFLOW}",
+              "run_id": "${GITHUB_RUN_ID}",
+              "run_number": "${GITHUB_RUN_NUMBER}",
+              "node_version": "$(node --version)"
+            },
+            "artifact": {
+              "size_bytes": ${FILE_SIZE},
+              "checksum_sha256": "${FILE_HASH}",
+              "filename": "${ZIP_FILE}"
+            },
+            "environment": "${ENVIRONMENT}"
+          }
+          EOF
+
+            # Upload metadata
+            aws s3 cp "/tmp/${comp}-metadata.json" \
+              "s3://${S3_BUCKET}/${S3_PREFIX}/${SHORT_SHA}.json" \
+              --content-type "application/json"
+
+            # Update 'latest' pointer on main branch
+            if [ "${GITHUB_REF_NAME}" == "main" ]; then
+              echo "  → s3://${S3_BUCKET}/${ENVIRONMENT}/${comp}/latest.zip (latest)"
+              aws s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/${SHORT_SHA}.zip" \
+                "s3://${S3_BUCKET}/${ENVIRONMENT}/${comp}/latest.zip"
+              aws s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/${SHORT_SHA}.json" \
+                "s3://${S3_BUCKET}/${ENVIRONMENT}/${comp}/latest.json"
+            fi
+
+            echo "  ✅ ${comp} uploaded ($(numfmt --to=iec-i --suffix=B $FILE_SIZE 2>/dev/null || echo ${FILE_SIZE} bytes))"
+          done
+
+          echo ""
+          echo "✅ All artifacts uploaded successfully!"
+
+      # -----------------------------------------------------------------------
+      # 12. Notify Slack (Success)
+      # -----------------------------------------------------------------------
+      - name: Notify Slack - Success
+        if: success() && (github.event.client_payload.response_url || github.event.inputs.response_url)
+        run: |
+          RESPONSE_URL="${{ github.event.client_payload.response_url || github.event.inputs.response_url }}"
+          COMPONENT="${{ github.event.client_payload.component || github.event.inputs.component || 'all' }}"
+          ENVIRONMENT="${{ github.event.client_payload.environment || github.event.inputs.environment || 'plt' }}"
+          VERSION="${GITHUB_SHA:0:7}"
+
+          curl -X POST "$RESPONSE_URL" \
+            -H 'Content-Type: application/json' \
+            -d @- <<EOF
+          {
+            "replace_original": true,
+            "text": "✅ Build Complete!",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "✅ *Build Complete!*\n\nComponent: \`${COMPONENT}\`\nEnvironment: \`${ENVIRONMENT}\`\nVersion: \`${VERSION}\`\nDuration: ${{ job.status == 'success' && 'Success' || 'Failed' }}"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*S3 Path:*\ns3://laco-${ENVIRONMENT}-lambda-artifacts/${ENVIRONMENT}/${COMPONENT}/builds/${VERSION}.zip"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*GitHub Run:*\n<https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|#${GITHUB_RUN_NUMBER}>"
+                  }
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 View Build Log"
+                    },
+                    "url": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+                  },
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "🚀 Deploy Now"
+                    },
+                    "value": "{\"component\":\"${COMPONENT}\",\"environment\":\"${ENVIRONMENT}\",\"version\":\"${VERSION}\"}",
+                    "action_id": "deploy_version"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 13. Notify Slack (Failure)
+      # -----------------------------------------------------------------------
+      - name: Notify Slack - Failure
+        if: failure() && (github.event.client_payload.response_url || github.event.inputs.response_url)
+        run: |
+          RESPONSE_URL="${{ github.event.client_payload.response_url || github.event.inputs.response_url }}"
+          COMPONENT="${{ github.event.client_payload.component || github.event.inputs.component || 'all' }}"
+
+          curl -X POST "$RESPONSE_URL" \
+            -H 'Content-Type: application/json' \
+            -d @- <<EOF
+          {
+            "replace_original": true,
+            "text": "❌ Build Failed",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "❌ *Build Failed*\n\nComponent: \`${COMPONENT}\`\nSee logs for details."
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 View Error Log"
+                    },
+                    "url": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+                    "style": "danger"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 14. Output summary
+      # -----------------------------------------------------------------------
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## 🎉 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Component:** ${{ github.event.client_payload.component || github.event.inputs.component || 'all' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.client_payload.environment || github.event.inputs.environment || 'plt' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${GITHUB_SHA:0:7}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "### ✅ Artifacts Uploaded" >> $GITHUB_STEP_SUMMARY
+            echo "S3 Bucket: \`laco-${{ github.event.client_payload.environment || github.event.inputs.environment || 'plt' }}-lambda-artifacts\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🚀 Deploy Command" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "/deploy ${{ github.event.client_payload.component || github.event.inputs.component }} ${{ github.event.client_payload.environment || github.event.inputs.environment || 'plt' }} --version=${GITHUB_SHA:0:7}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

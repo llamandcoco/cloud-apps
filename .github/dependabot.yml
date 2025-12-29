@@ -1,0 +1,47 @@
+version: 2
+updates:
+  # Slack Bot dependencies
+  - package-ecosystem: "npm"
+    directory: "/cloud-apps/applications/chatops/slack-bot"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "lama"
+    labels:
+      - "dependencies"
+      - "slack-bot"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Slack Bot Infrastructure (CDK)
+  - package-ecosystem: "npm"
+    directory: "/cloud-apps/applications/chatops/slack-bot/infrastructure"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "lama"
+    labels:
+      - "dependencies"
+      - "infrastructure"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
