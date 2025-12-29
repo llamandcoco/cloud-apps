@@ -45,6 +45,7 @@ help:
 	@echo "  make upload-echo            - Upload echo worker (auto-build)"
 	@echo "  make upload-deploy          - Upload deploy worker"
 	@echo "  make upload-status          - Upload status worker"
+	@echo "  make upload-build           - Upload build worker"
 	@echo "  make upload-all             - Upload all workers"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda:$(NC)"
@@ -52,6 +53,7 @@ help:
 	@echo "  make deploy-echo            - Upload to S3 → Deploy (default)"
 	@echo "  make deploy-deploy          - Upload to S3 → Deploy (default)"
 	@echo "  make deploy-status          - Upload to S3 → Deploy (default)"
+	@echo "  make deploy-build           - Upload to S3 → Deploy (default)"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
 	@echo "  make deploy-echo-local      - Deploy from local dist/ (no upload)"
@@ -128,6 +130,12 @@ build-status: clean-dist
 	$(SCRIPTS_DIR)/package.sh status
 	@echo "$(GREEN)✓ Status worker built$(NC)"
 
+build-build:
+	@echo "$(BLUE)Building build worker...$(NC)"
+	npm run build
+	npm run package
+	@echo "$(GREEN)✓ Build worker built$(NC)"
+
 # -----------------------------------------------------------------------------
 # Upload to S3
 # -----------------------------------------------------------------------------
@@ -156,7 +164,12 @@ upload-status: build-status verify-aws
 	$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
 		$(SCRIPTS_DIR)/upload-lambda.sh status $(ENVIRONMENT) $(VERSION)
 
-upload-all: upload-router upload-echo upload-deploy upload-status
+upload-build: build-build verify-aws
+	@echo "$(BLUE)Uploading build worker to S3...$(NC)"
+	$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
+		$(SCRIPTS_DIR)/upload-lambda.sh build $(ENVIRONMENT) $(VERSION)
+
+upload-all: upload-router upload-echo upload-deploy upload-status upload-build
 	@echo "$(GREEN)✓ All components uploaded$(NC)"
 
 # -----------------------------------------------------------------------------
@@ -199,6 +212,17 @@ deploy-status: upload-status
 	cd $(SANDBOX_ROOT)/chatbot-status-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
 	@echo "$(GREEN)✓ Status worker deployed from S3$(NC)"
+
+deploy-build: build-build
+	@echo "$(BLUE)Deploying build worker from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-build-worker && terragrunt apply
+	@echo "$(GREEN)✓ Build worker deployed$(NC)"
+
+deploy-build-s3: upload-build
+	@echo "$(BLUE)Deploying build worker from S3...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-build-worker && \
+		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
+	@echo "$(GREEN)✓ Build worker deployed from S3$(NC)"
 
 # -----------------------------------------------------------------------------
 # Deploy Lambda (Advanced)
