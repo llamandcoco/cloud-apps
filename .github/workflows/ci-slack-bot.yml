@@ -142,7 +142,7 @@ jobs:
           zip -r ../../status-worker.zip .
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lambda-packages
           path: |
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload deployment marker
         if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deployment-marker
           path: deployment-ready.txt
