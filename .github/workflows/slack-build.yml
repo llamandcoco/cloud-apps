@@ -105,7 +105,7 @@ jobs:
       # 9. Configure AWS Credentials (OIDC - no secrets!)
       # -----------------------------------------------------------------------
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.ACTIONS_DEPLOY_ROLE_ARN }}
           aws-region: ca-central-1
