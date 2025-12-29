@@ -28,7 +28,14 @@ fi
 # Configuration
 BUCKET="laco-${ENVIRONMENT}-lambda-artifacts"
 BUILD_DIR="dist"
-ZIP_FILE="${FUNCTION}-worker.zip"
+
+# Determine ZIP filename (router doesn't have -worker suffix)
+if [ "$FUNCTION" = "router" ]; then
+  ZIP_FILE="router.zip"
+else
+  ZIP_FILE="${FUNCTION}-worker.zip"
+fi
+
 S3_PREFIX="${ENVIRONMENT}/${FUNCTION}/builds"
 REGION="${AWS_REGION:-ca-central-1}"
 
