@@ -109,7 +109,8 @@ build-router: clean-dist
 	@echo "$(BLUE)Building router...$(NC)"
 	npm run build
 	$(SCRIPTS_DIR)/package.sh router
-	@echo "$(GREEN)✓ Router built$(NC)"
+	@test -f dist/router.zip || (echo "$(YELLOW)Error: router.zip not created$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Router built: dist/router.zip$(NC)"
 
 build-echo: clean-dist
 	@echo "$(BLUE)Building echo worker...$(NC)"
@@ -122,19 +123,22 @@ build-deploy: clean-dist
 	@echo "$(BLUE)Building deploy worker...$(NC)"
 	npm run build
 	$(SCRIPTS_DIR)/package.sh deploy
-	@echo "$(GREEN)✓ Deploy worker built$(NC)"
+	@test -f dist/deploy-worker.zip || (echo "$(YELLOW)Error: deploy-worker.zip not created$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Deploy worker built: dist/deploy-worker.zip$(NC)"
 
 build-status: clean-dist
 	@echo "$(BLUE)Building status worker...$(NC)"
 	npm run build
 	$(SCRIPTS_DIR)/package.sh status
-	@echo "$(GREEN)✓ Status worker built$(NC)"
+	@test -f dist/status-worker.zip || (echo "$(YELLOW)Error: status-worker.zip not created$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Status worker built: dist/status-worker.zip$(NC)"
 
-build-build:
+build-build: clean-dist
 	@echo "$(BLUE)Building build worker...$(NC)"
 	npm run build
-	npm run package
-	@echo "$(GREEN)✓ Build worker built$(NC)"
+	$(SCRIPTS_DIR)/package.sh build
+	@test -f dist/build-worker.zip || (echo "$(YELLOW)Error: build-worker.zip not created$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Build worker built: dist/build-worker.zip$(NC)"
 
 # -----------------------------------------------------------------------------
 # Upload to S3
