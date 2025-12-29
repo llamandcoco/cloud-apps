@@ -163,11 +163,16 @@ jobs:
       - name: Upload to S3
         if: github.ref == 'refs/heads/main'
         working-directory: ${{ env.APP_PATH }}
+        env:
+          VERSION: ${{ github.event.pull_request.head.sha && github.event.pull_request.head.sha || github.sha }}
+          ENVIRONMENT: plt
         run: |
-          aws s3 cp dist/router.zip s3://laco-lambda-artifacts/slack-bot/${{ github.sha }}/router.zip
-          aws s3 cp dist/echo-worker.zip s3://laco-lambda-artifacts/slack-bot/${{ github.sha }}/echo-worker.zip
-          aws s3 cp dist/deploy-worker.zip s3://laco-lambda-artifacts/slack-bot/${{ github.sha }}/deploy-worker.zip
-          aws s3 cp dist/status-worker.zip s3://laco-lambda-artifacts/slack-bot/${{ github.sha }}/status-worker.zip
+          VERSION_SHORT=$(echo "$VERSION" | cut -c1-7)
+
+          ./scripts/upload-lambda.sh router $ENVIRONMENT $VERSION_SHORT
+          ./scripts/upload-lambda.sh echo $ENVIRONMENT $VERSION_SHORT
+          ./scripts/upload-lambda.sh deploy $ENVIRONMENT $VERSION_SHORT
+          ./scripts/upload-lambda.sh status $ENVIRONMENT $VERSION_SHORT
 
       - name: Create deployment marker
         if: github.ref == 'refs/heads/main'
