@@ -12,6 +12,9 @@ on:
       - 'applications/chatops/slack-bot/**'
   workflow_dispatch:
 
+permissions:
+  id-token: write   # Required for OIDC authentication
+  contents: read
 
 env:
   APP_PATH: applications/chatops/slack-bot
