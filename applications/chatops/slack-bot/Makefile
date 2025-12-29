@@ -2,7 +2,7 @@
 # Slack Bot - Makefile
 # =============================================================================
 
-.PHONY: help build upload deploy test clean
+.PHONY: help build upload deploy test clean clean-dist clean-all
 
 # -----------------------------------------------------------------------------
 # Variables
@@ -47,17 +47,15 @@ help:
 	@echo "  make upload-status          - Upload status worker"
 	@echo "  make upload-all             - Upload all workers"
 	@echo ""
-	@echo "$(GREEN)Deploy Lambda (Local):$(NC)"
-	@echo "  make deploy-router          - Deploy router from local build"
-	@echo "  make deploy-echo            - Deploy echo worker from local build"
-	@echo "  make deploy-deploy          - Deploy deploy worker from local build"
-	@echo "  make deploy-status          - Deploy status worker from local build"
+	@echo "$(GREEN)Deploy Lambda:$(NC)"
+	@echo "  make deploy-router          - Upload to S3 → Deploy (default)"
+	@echo "  make deploy-echo            - Upload to S3 → Deploy (default)"
+	@echo "  make deploy-deploy          - Upload to S3 → Deploy (default)"
+	@echo "  make deploy-status          - Upload to S3 → Deploy (default)"
 	@echo ""
-	@echo "$(GREEN)Deploy Lambda (S3):$(NC)"
-	@echo "  make deploy-router-s3       - Deploy router from S3"
-	@echo "  make deploy-echo-s3         - Deploy echo worker from S3"
-	@echo "  make deploy-deploy-s3       - Deploy deploy worker from S3"
-	@echo "  make deploy-status-s3       - Deploy status worker from S3"
+	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
+	@echo "  make deploy-echo-local      - Deploy from local dist/ (no upload)"
+	@echo "  make deploy-echo-s3         - Deploy from S3 (upload if not exists)"
 	@echo ""
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
@@ -99,34 +97,35 @@ verify-aws:
 # Build
 # -----------------------------------------------------------------------------
 
-build:
+build: clean-dist
 	@echo "$(BLUE)Building all Lambda functions...$(NC)"
 	npm run build
 	npm run package
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
-build-router:
+build-router: clean-dist
 	@echo "$(BLUE)Building router...$(NC)"
 	npm run build
-	npm run package
+	$(SCRIPTS_DIR)/package.sh router
 	@echo "$(GREEN)✓ Router built$(NC)"
 
-build-echo:
+build-echo: clean-dist
 	@echo "$(BLUE)Building echo worker...$(NC)"
 	npm run build
-	npm run package
-	@echo "$(GREEN)✓ Echo worker built$(NC)"
+	$(SCRIPTS_DIR)/package.sh echo
+	@test -f dist/echo-worker.zip || (echo "$(YELLOW)Error: echo-worker.zip not created$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Echo worker built: dist/echo-worker.zip$(NC)"
 
-build-deploy:
+build-deploy: clean-dist
 	@echo "$(BLUE)Building deploy worker...$(NC)"
 	npm run build
-	npm run package
+	$(SCRIPTS_DIR)/package.sh deploy
 	@echo "$(GREEN)✓ Deploy worker built$(NC)"
 
-build-status:
+build-status: clean-dist
 	@echo "$(BLUE)Building status worker...$(NC)"
 	npm run build
-	npm run package
+	$(SCRIPTS_DIR)/package.sh status
 	@echo "$(GREEN)✓ Status worker built$(NC)"
 
 # -----------------------------------------------------------------------------
@@ -162,67 +161,69 @@ upload-all: upload-router upload-echo upload-deploy upload-status
 
 # -----------------------------------------------------------------------------
 # Deploy Lambda
+# Default: Upload to S3 → Deploy (recommended for production)
 # -----------------------------------------------------------------------------
 
-deploy-router: build-router
-	@echo "$(BLUE)Deploying router lambda from local build...$(NC)"
-	cd $(SANDBOX_ROOT)/slack-router-lambda && terragrunt apply
-	@echo "$(GREEN)✓ Router lambda deployed$(NC)"
-
-deploy-router-s3: upload-router
-	@echo "$(BLUE)Deploying router lambda from S3...$(NC)"
+deploy-router: upload-router
+	@echo "$(BLUE)Deploying router from S3 (version: $(VERSION))...$(NC)"
 	@if [ -f .s3-version-id-router.tmp ]; then \
 		S3_VERSION_ID=$$(cat .s3-version-id-router.tmp); \
-		echo "Using S3 Version ID: $$S3_VERSION_ID"; \
 		cd $(SANDBOX_ROOT)/slack-router-lambda && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) S3_OBJECT_VERSION=$$S3_VERSION_ID terragrunt apply; \
 	else \
-		echo "$(YELLOW)Warning: Version ID not found, deploying without it$(NC)"; \
 		cd $(SANDBOX_ROOT)/slack-router-lambda && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
 	fi
-	@echo "$(GREEN)✓ Router lambda deployed from S3$(NC)"
+	@echo "$(GREEN)✓ Router deployed from S3$(NC)"
 
-deploy-echo: build-echo
-	@echo "$(BLUE)Deploying echo worker from local build...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-echo-worker && terragrunt apply
-	@echo "$(GREEN)✓ Echo worker deployed$(NC)"
-
-deploy-echo-s3: upload-echo
-	@echo "$(BLUE)Deploying echo worker from S3...$(NC)"
+deploy-echo: upload-echo
+	@echo "$(BLUE)Deploying echo worker from S3 (version: $(VERSION))...$(NC)"
 	@if [ -f .s3-version-id-echo.tmp ]; then \
 		S3_VERSION_ID=$$(cat .s3-version-id-echo.tmp); \
-		echo "Using S3 Version ID: $$S3_VERSION_ID"; \
 		cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) S3_OBJECT_VERSION=$$S3_VERSION_ID terragrunt apply; \
 	else \
-		echo "$(YELLOW)Warning: Version ID not found, deploying without it$(NC)"; \
 		cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
 	fi
 	@echo "$(GREEN)✓ Echo worker deployed from S3$(NC)"
 
-deploy-deploy: build-deploy
-	@echo "$(BLUE)Deploying deploy worker from local build...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-deploy-worker && terragrunt apply
-	@echo "$(GREEN)✓ Deploy worker deployed$(NC)"
-
-deploy-deploy-s3: upload-deploy
-	@echo "$(BLUE)Deploying deploy worker from S3...$(NC)"
+deploy-deploy: upload-deploy
+	@echo "$(BLUE)Deploying deploy worker from S3 (version: $(VERSION))...$(NC)"
 	cd $(SANDBOX_ROOT)/chatbot-deploy-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
 	@echo "$(GREEN)✓ Deploy worker deployed from S3$(NC)"
 
-deploy-status: build-status
-	@echo "$(BLUE)Deploying status worker from local build...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-status-worker && terragrunt apply
-	@echo "$(GREEN)✓ Status worker deployed$(NC)"
-
-deploy-status-s3: upload-status
-	@echo "$(BLUE)Deploying status worker from S3...$(NC)"
+deploy-status: upload-status
+	@echo "$(BLUE)Deploying status worker from S3 (version: $(VERSION))...$(NC)"
 	cd $(SANDBOX_ROOT)/chatbot-status-worker && \
 		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
 	@echo "$(GREEN)✓ Status worker deployed from S3$(NC)"
+
+# -----------------------------------------------------------------------------
+# Deploy Lambda (Advanced)
+# -----------------------------------------------------------------------------
+
+# Deploy from local dist/ without uploading (fast for testing)
+deploy-echo-local: build-echo
+	@echo "$(BLUE)Deploying echo worker from local build...$(NC)"
+	cd $(SANDBOX_ROOT)/chatbot-echo-worker && terragrunt apply
+	@echo "$(GREEN)✓ Echo worker deployed from local$(NC)"
+
+# Deploy from S3, upload only if version doesn't exist
+deploy-echo-s3:
+	@echo "$(BLUE)Deploying echo worker from S3 (version: $(VERSION))...$(NC)"
+	@S3_BUCKET="laco-plt-lambda-artifacts"; \
+	S3_KEY="plt/echo/builds/$(VERSION).zip"; \
+	if $(AWS_CMD) s3api head-object --bucket $$S3_BUCKET --key $$S3_KEY --region $(REGION) >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ Version $(VERSION) exists in S3, deploying...$(NC)"; \
+	else \
+		echo "$(YELLOW)Version $(VERSION) not found in S3, uploading first...$(NC)"; \
+		$(MAKE) upload-echo; \
+	fi
+	@cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
+		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
+	@echo "$(GREEN)✓ Echo worker deployed from S3$(NC)"
 
 # -----------------------------------------------------------------------------
 # Quick Deploy (upload + deploy in one command)
@@ -260,9 +261,16 @@ test-echo-worker:
 # Clean
 # -----------------------------------------------------------------------------
 
+clean-dist:
+	@echo "$(BLUE)Cleaning dist artifacts...$(NC)"
+	@rm -rf dist/*.zip
+	@rm -rf build
+	@echo "$(GREEN)✓ Dist cleaned$(NC)"
+
 clean:
 	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
 	rm -rf $(BUILD_DIR)/*.zip
+	rm -rf build
 	rm -rf node_modules/.cache
 	rm -f .s3-version-id-*.tmp
 	@echo "$(GREEN)✓ Clean complete$(NC)"
