@@ -12,6 +12,7 @@ on:
       - 'applications/chatops/slack-bot/**'
   workflow_dispatch:
 
+
 env:
   APP_PATH: applications/chatops/slack-bot
   NODE_VERSION: '20'
