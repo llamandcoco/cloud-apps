@@ -1,5 +1,8 @@
 #!/bin/bash
 # Lambda packaging script - Creates deployment packages for each Lambda function
+# Usage: ./package.sh [worker-name]
+#   worker-name: Optional. If specified, only packages that worker (router, echo, deploy, status)
+#   If omitted, packages all workers
 
 set -e
 
@@ -8,11 +11,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 DIST_DIR="$PROJECT_ROOT/dist"
 
+# Parse arguments
+TARGET_WORKER="$1"
+
 echo "🚀 Starting Lambda packaging process..."
 
-# Clean previous builds
-echo "🧹 Cleaning previous builds..."
-rm -rf "$DIST_DIR"
+# Create dist directory if it doesn't exist
 mkdir -p "$DIST_DIR"
 
 # Ensure build exists
@@ -64,13 +68,37 @@ package_lambda() {
   echo "   ✅ $name.zip created ($size)"
 }
 
-# Package each Lambda
-package_lambda "router" "$BUILD_DIR/router"
-package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
-package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
-package_lambda "status-worker" "$BUILD_DIR/workers/status"
+# Package based on target
+if [ -n "$TARGET_WORKER" ]; then
+  # Package specific worker
+  case "$TARGET_WORKER" in
+    router)
+      package_lambda "router" "$BUILD_DIR/router"
+      ;;
+    echo)
+      package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
+      ;;
+    deploy)
+      package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
+      ;;
+    status)
+      package_lambda "status-worker" "$BUILD_DIR/workers/status"
+      ;;
+    *)
+      echo "❌ Unknown worker: $TARGET_WORKER"
+      echo "Valid options: router, echo, deploy, status"
+      exit 1
+      ;;
+  esac
+else
+  # Package all workers
+  package_lambda "router" "$BUILD_DIR/router"
+  package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
+  package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
+  package_lambda "status-worker" "$BUILD_DIR/workers/status"
+fi
 
 echo ""
 echo "✨ Packaging complete!"
 echo "📦 Packages created in: $DIST_DIR"
-ls -lh "$DIST_DIR"/*.zip
+ls -lh "$DIST_DIR"/*.zip 2>/dev/null || echo "  (use ./package.sh [worker-name] to package specific worker)"
