@@ -37,31 +37,30 @@ help:
 	@echo ""
 	@echo "$(GREEN)Build:$(NC)"
 	@echo "  make build                  - Build all Lambda functions"
-	@echo "  make build-router           - Build router only"
-	@echo "  make build-echo             - Build echo worker only"
+	@echo "  make build-<component>      - Build specific component"
+	@echo "    Components: router, echo, deploy, status, build"
 	@echo ""
 	@echo "$(GREEN)Upload to S3:$(NC)"
-	@echo "  make upload-router          - Upload router (auto-build)"
-	@echo "  make upload-echo            - Upload echo worker (auto-build)"
-	@echo "  make upload-deploy          - Upload deploy worker"
-	@echo "  make upload-status          - Upload status worker"
-	@echo "  make upload-all             - Upload all workers"
+	@echo "  make upload-<component>     - Upload component (auto-build)"
+	@echo "  make upload-all             - Upload all components"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda:$(NC)"
-	@echo "  make deploy-router          - Upload to S3 → Deploy (default)"
-	@echo "  make deploy-echo            - Upload to S3 → Deploy (default)"
-	@echo "  make deploy-deploy          - Upload to S3 → Deploy (default)"
-	@echo "  make deploy-status          - Upload to S3 → Deploy (default)"
+	@echo "  make deploy-<component>     - Upload to S3 → Deploy"
+	@echo "  make deploy-build           - Deploy build worker from local (default)"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
-	@echo "  make deploy-echo-local      - Deploy from local dist/ (no upload)"
-	@echo "  make deploy-echo-s3         - Deploy from S3 (upload if not exists)"
+	@echo "  make deploy-<component>-local - Deploy from local dist/ (fast, no upload)"
 	@echo ""
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
 	@echo "  make test-integration       - Run integration tests"
-	@echo "  make test-router-lambda     - Test router lambda integration"
-	@echo "  make test-echo-worker       - Test echo worker integration"
+	@echo "  make test-<name>            - Run specific integration test"
+	@echo ""
+	@echo "$(GREEN)Code Quality:$(NC)"
+	@echo "  make lint                   - Run ESLint"
+	@echo "  make lint-fix               - Run ESLint with auto-fix"
+	@echo "  make type-check             - Run TypeScript type check"
+	@echo "  make ci                     - Run all CI checks"
 	@echo ""
 	@echo "$(GREEN)Utilities:$(NC)"
 	@echo "  make clean                  - Clean build artifacts"
@@ -97,66 +96,32 @@ verify-aws:
 # Build
 # -----------------------------------------------------------------------------
 
+# Valid components (must match scripts/component-config.sh)
+COMPONENTS := router echo deploy status build
+
 build: clean-dist
 	@echo "$(BLUE)Building all Lambda functions...$(NC)"
 	npm run build
 	npm run package
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
-build-router: clean-dist
-	@echo "$(BLUE)Building router...$(NC)"
-	npm run build
-	$(SCRIPTS_DIR)/package.sh router
-	@echo "$(GREEN)✓ Router built$(NC)"
-
-build-echo: clean-dist
-	@echo "$(BLUE)Building echo worker...$(NC)"
-	npm run build
-	$(SCRIPTS_DIR)/package.sh echo
-	@test -f dist/echo-worker.zip || (echo "$(YELLOW)Error: echo-worker.zip not created$(NC)" && exit 1)
-	@echo "$(GREEN)✓ Echo worker built: dist/echo-worker.zip$(NC)"
-
-build-deploy: clean-dist
-	@echo "$(BLUE)Building deploy worker...$(NC)"
-	npm run build
-	$(SCRIPTS_DIR)/package.sh deploy
-	@echo "$(GREEN)✓ Deploy worker built$(NC)"
-
-build-status: clean-dist
-	@echo "$(BLUE)Building status worker...$(NC)"
-	npm run build
-	$(SCRIPTS_DIR)/package.sh status
-	@echo "$(GREEN)✓ Status worker built$(NC)"
+# Pattern rule: build-<component>
+build-%: clean-dist
+	@$(SCRIPTS_DIR)/build-component.sh $*
 
 # -----------------------------------------------------------------------------
 # Upload to S3
 # -----------------------------------------------------------------------------
 
-upload-router: build-router verify-aws
-	@echo "$(BLUE)Uploading router to S3...$(NC)"
+# Pattern rule: upload-<component>
+upload-%: build-% verify-aws
+	@echo "$(BLUE)Uploading $* to S3...$(NC)"
 	@UPLOAD_OUTPUT=$$($(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
-		$(SCRIPTS_DIR)/upload-lambda.sh router $(ENVIRONMENT) $(VERSION)); \
+		$(SCRIPTS_DIR)/upload-lambda.sh $* $(ENVIRONMENT) $(VERSION)); \
 	echo "$$UPLOAD_OUTPUT"; \
-	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-router.tmp
+	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-$*.tmp || true
 
-upload-echo: build-echo verify-aws
-	@echo "$(BLUE)Uploading echo worker to S3...$(NC)"
-	@UPLOAD_OUTPUT=$$($(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
-		$(SCRIPTS_DIR)/upload-lambda.sh echo $(ENVIRONMENT) $(VERSION)); \
-	echo "$$UPLOAD_OUTPUT"; \
-	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-echo.tmp
-
-upload-deploy: build-deploy verify-aws
-	@echo "$(BLUE)Uploading deploy worker to S3...$(NC)"
-	$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
-		$(SCRIPTS_DIR)/upload-lambda.sh deploy $(ENVIRONMENT) $(VERSION)
-
-upload-status: build-status verify-aws
-	@echo "$(BLUE)Uploading status worker to S3...$(NC)"
-	$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
-		$(SCRIPTS_DIR)/upload-lambda.sh status $(ENVIRONMENT) $(VERSION)
-
-upload-all: upload-router upload-echo upload-deploy upload-status
+upload-all: upload-router upload-echo upload-deploy upload-status upload-build
 	@echo "$(GREEN)✓ All components uploaded$(NC)"
 
 # -----------------------------------------------------------------------------
@@ -164,75 +129,38 @@ upload-all: upload-router upload-echo upload-deploy upload-status
 # Default: Upload to S3 → Deploy (recommended for production)
 # -----------------------------------------------------------------------------
 
-deploy-router: upload-router
-	@echo "$(BLUE)Deploying router from S3 (version: $(VERSION))...$(NC)"
-	@if [ -f .s3-version-id-router.tmp ]; then \
-		S3_VERSION_ID=$$(cat .s3-version-id-router.tmp); \
-		cd $(SANDBOX_ROOT)/slack-router-lambda && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) S3_OBJECT_VERSION=$$S3_VERSION_ID terragrunt apply; \
-	else \
-		cd $(SANDBOX_ROOT)/slack-router-lambda && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
-	fi
-	@echo "$(GREEN)✓ Router deployed from S3$(NC)"
+# Pattern rule: deploy-<component> (from S3)
+# Note: deploy-build uses local build by default
+deploy-build: build-build
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh build --local
 
-deploy-echo: upload-echo
-	@echo "$(BLUE)Deploying echo worker from S3 (version: $(VERSION))...$(NC)"
-	@if [ -f .s3-version-id-echo.tmp ]; then \
-		S3_VERSION_ID=$$(cat .s3-version-id-echo.tmp); \
-		cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) S3_OBJECT_VERSION=$$S3_VERSION_ID terragrunt apply; \
-	else \
-		cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply; \
-	fi
-	@echo "$(GREEN)✓ Echo worker deployed from S3$(NC)"
-
-deploy-deploy: upload-deploy
-	@echo "$(BLUE)Deploying deploy worker from S3 (version: $(VERSION))...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-deploy-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
-	@echo "$(GREEN)✓ Deploy worker deployed from S3$(NC)"
-
-deploy-status: upload-status
-	@echo "$(BLUE)Deploying status worker from S3 (version: $(VERSION))...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-status-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
-	@echo "$(GREEN)✓ Status worker deployed from S3$(NC)"
+# All other components deploy from S3
+deploy-%: upload-%
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $*
 
 # -----------------------------------------------------------------------------
 # Deploy Lambda (Advanced)
 # -----------------------------------------------------------------------------
 
-# Deploy from local dist/ without uploading (fast for testing)
-deploy-echo-local: build-echo
-	@echo "$(BLUE)Deploying echo worker from local build...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-echo-worker && terragrunt apply
-	@echo "$(GREEN)✓ Echo worker deployed from local$(NC)"
+# Pattern rule: deploy-<component>-local (from local dist/, fast for testing)
+# Note: We manually handle the dependency to avoid pattern matching issues
+deploy-%-local: FORCE
+	@COMPONENT=$(patsubst deploy-%-local,%,$@); \
+	$(MAKE) build-$$COMPONENT && \
+	VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $$COMPONENT --local
 
-# Deploy from S3, upload only if version doesn't exist
-deploy-echo-s3:
-	@echo "$(BLUE)Deploying echo worker from S3 (version: $(VERSION))...$(NC)"
-	@S3_BUCKET="laco-plt-lambda-artifacts"; \
-	S3_KEY="plt/echo/builds/$(VERSION).zip"; \
-	if $(AWS_CMD) s3api head-object --bucket $$S3_BUCKET --key $$S3_KEY --region $(REGION) >/dev/null 2>&1; then \
-		echo "$(GREEN)✓ Version $(VERSION) exists in S3, deploying...$(NC)"; \
-	else \
-		echo "$(YELLOW)Version $(VERSION) not found in S3, uploading first...$(NC)"; \
-		$(MAKE) upload-echo; \
-	fi
-	@cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply
-	@echo "$(GREEN)✓ Echo worker deployed from S3$(NC)"
+# Deploy from S3 with smart version handling
+# Usage:
+#   make deploy-echo-s3                    # Interactive selection
+#   VERSION=abc123 make deploy-echo-s3     # Deploy specific version
+deploy-echo-s3: verify-aws
+	@$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) \
+	AWS_REGION=$(REGION) \
+	SANDBOX_ROOT=$(SANDBOX_ROOT) \
+	$(SCRIPTS_DIR)/deploy-from-s3.sh echo $(ENVIRONMENT)
 
-# -----------------------------------------------------------------------------
-# Quick Deploy (upload + deploy in one command)
-# -----------------------------------------------------------------------------
-
-quick-deploy-echo: upload-echo
-	@echo "$(BLUE)Quick deploying echo worker...$(NC)"
-	cd $(SANDBOX_ROOT)/chatbot-echo-worker && \
-		USE_S3_ARTIFACTS=true LAMBDA_VERSION=$(VERSION) terragrunt apply -auto-approve
+FORCE:
+.PHONY: FORCE
 
 # -----------------------------------------------------------------------------
 # Test
@@ -247,15 +175,32 @@ test-integration:
 	cd $(SANDBOX_ROOT)/tests/integration && \
 		./test-localstack.sh
 
-test-router-lambda:
-	@echo "$(BLUE)Testing router lambda integration...$(NC)"
-	cd $(SANDBOX_ROOT)/tests/integration && \
-		./test-router-lambda.sh
+# Pattern rule for integration tests
+# Expects test script at $(SANDBOX_ROOT)/tests/integration/test-%.sh
+test-%: FORCE
+	@echo "$(BLUE)Testing $* integration...$(NC)"
+	@cd $(SANDBOX_ROOT)/tests/integration && \
+		(./test-$*.sh || echo "$(YELLOW)Note: Create test-$*.sh first$(NC)")
 
-test-echo-worker:
-	@echo "$(BLUE)Testing echo worker integration...$(NC)"
-	cd $(SANDBOX_ROOT)/tests/integration && \
-		./test-echo-worker.sh || echo "$(YELLOW)Note: Create test-echo-worker.sh first$(NC)"
+# -----------------------------------------------------------------------------
+# Code Quality
+# -----------------------------------------------------------------------------
+
+lint:
+	@echo "$(BLUE)Running ESLint...$(NC)"
+	npm run lint
+
+lint-fix:
+	@echo "$(BLUE)Running ESLint with auto-fix...$(NC)"
+	npm run lint:fix
+
+type-check:
+	@echo "$(BLUE)Running TypeScript type check...$(NC)"
+	npm run type-check
+
+ci:
+	@echo "$(BLUE)Running CI checks (lint + type-check + test:coverage + build)...$(NC)"
+	npm run ci
 
 # -----------------------------------------------------------------------------
 # Clean
@@ -279,27 +224,3 @@ clean-all: clean
 	@echo "$(BLUE)Cleaning all dependencies...$(NC)"
 	rm -rf node_modules
 	@echo "$(GREEN)✓ Deep clean complete$(NC)"
-
-# -----------------------------------------------------------------------------
-# Development Shortcuts
-# -----------------------------------------------------------------------------
-
-dev-echo: upload-echo
-	@echo "$(GREEN)✓ Echo worker ready for testing$(NC)"
-	@echo ""
-	@echo "Next steps:"
-	@echo "  1. Deploy: make deploy-echo"
-	@echo "  2. Test:   make test-echo-worker"
-
-# -----------------------------------------------------------------------------
-# Production Deploy
-# -----------------------------------------------------------------------------
-
-prod-upload-echo: verify-aws
-	@echo "$(YELLOW)Uploading to PRODUCTION...$(NC)"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) AWS_REGION=$(REGION) \
-		$(SCRIPTS_DIR)/upload-lambda.sh echo prod $(VERSION); \
-	fi

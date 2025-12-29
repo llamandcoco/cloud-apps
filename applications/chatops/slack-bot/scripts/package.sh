@@ -84,9 +84,12 @@ if [ -n "$TARGET_WORKER" ]; then
     status)
       package_lambda "status-worker" "$BUILD_DIR/workers/status"
       ;;
+    build)
+      package_lambda "build-worker" "$BUILD_DIR/workers/build"
+      ;;
     *)
       echo "❌ Unknown worker: $TARGET_WORKER"
-      echo "Valid options: router, echo, deploy, status"
+      echo "Valid options: router, echo, deploy, status, build"
       exit 1
       ;;
   esac
@@ -96,6 +99,7 @@ else
   package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
   package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
   package_lambda "status-worker" "$BUILD_DIR/workers/status"
+  package_lambda "build-worker" "$BUILD_DIR/workers/build"
 fi
 
 echo ""
