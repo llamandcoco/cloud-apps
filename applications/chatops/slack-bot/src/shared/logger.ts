@@ -11,17 +11,44 @@ interface LogEntry {
 
 class Logger {
   private logLevel: LogLevel;
+  private correlationId?: string;
+  private context?: Record<string, unknown>;
 
-  constructor() {
+  constructor(correlationId?: string, context?: Record<string, unknown>) {
     const level = (process.env.LOG_LEVEL || 'info').toLowerCase();
     this.logLevel = ['debug', 'info', 'warn', 'error'].includes(level)
       ? (level as LogLevel)
       : 'info';
+    this.correlationId = correlationId;
+    this.context = context;
+  }
+
+  /**
+   * Create a child logger with correlation ID and context
+   */
+  child(correlationId: string, context?: Record<string, unknown>): Logger {
+    return new Logger(correlationId, { ...this.context, ...context });
   }
 
   private shouldLog(level: LogLevel): boolean {
     const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
     return levels.indexOf(level) >= levels.indexOf(this.logLevel);
+  }
+
+  private getTraceContext(): Record<string, unknown> {
+    const traceContext: Record<string, unknown> = {};
+
+    // Add X-Ray trace ID if available
+    if (process.env._X_AMZN_TRACE_ID) {
+      traceContext.traceId = process.env._X_AMZN_TRACE_ID;
+    }
+
+    // Add AWS Request ID if available
+    if (process.env.AWS_REQUEST_ID) {
+      traceContext.requestId = process.env.AWS_REQUEST_ID;
+    }
+
+    return traceContext;
   }
 
   private log(level: LogLevel, message: string, metadata?: Record<string, unknown>) {
@@ -33,6 +60,9 @@ class Logger {
       timestamp: new Date().toISOString(),
       environment: process.env.ENVIRONMENT || 'unknown',
       org: process.env.ORG_PREFIX || 'unknown',
+      ...(this.correlationId && { correlationId: this.correlationId }),
+      ...this.getTraceContext(),
+      ...this.context,
       ...metadata
     };
 
