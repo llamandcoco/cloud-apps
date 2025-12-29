@@ -18,6 +18,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Load component configuration
+source "$SCRIPT_DIR/component-config.sh"
+
 # S3 Configuration
 S3_BUCKET="laco-${ENVIRONMENT}-lambda-artifacts"
 S3_PREFIX="${ENVIRONMENT}/${COMPONENT}/builds"
@@ -25,31 +28,17 @@ S3_PREFIX="${ENVIRONMENT}/${COMPONENT}/builds"
 if [ -z "$COMPONENT" ] || [ -z "$ENVIRONMENT" ]; then
   echo -e "${YELLOW}Error: Component and environment required${NC}"
   echo "Usage: $0 <component> <environment> [version]"
+  echo "Valid components: $VALID_COMPONENTS"
   exit 1
 fi
 
-# Component to Terragrunt directory mapping
-case "$COMPONENT" in
-  router)
-    TG_PATH="slack-router-lambda"
-    ;;
-  echo)
-    TG_PATH="chatbot-echo-worker"
-    ;;
-  deploy)
-    TG_PATH="chatbot-deploy-worker"
-    ;;
-  status)
-    TG_PATH="chatbot-status-worker"
-    ;;
-  build)
-    TG_PATH="chatbot-build-worker"
-    ;;
-  *)
-    echo -e "${YELLOW}Error: Unknown component: $COMPONENT${NC}"
-    exit 1
-    ;;
-esac
+# Validate and get component info
+if ! validate_component "$COMPONENT"; then
+  show_component_error "$COMPONENT"
+  exit 1
+fi
+
+TG_PATH=$(get_tg_path "$COMPONENT")
 
 echo -e "${BLUE}Deploying $COMPONENT from S3 (environment: $ENVIRONMENT)...${NC}"
 

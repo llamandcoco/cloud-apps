@@ -15,36 +15,23 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Load component configuration
+source "$SCRIPT_DIR/component-config.sh"
+
 if [ -z "$COMPONENT" ]; then
   echo -e "${YELLOW}Error: Component name required${NC}"
   echo "Usage: $0 <component-name>"
-  echo "Valid components: router, echo, deploy, status, build"
+  echo "Valid components: $VALID_COMPONENTS"
   exit 1
 fi
 
-# Component to zip filename mapping
-case "$COMPONENT" in
-  router)
-    ZIP_NAME="router"
-    ;;
-  echo)
-    ZIP_NAME="echo-worker"
-    ;;
-  deploy)
-    ZIP_NAME="deploy-worker"
-    ;;
-  status)
-    ZIP_NAME="status-worker"
-    ;;
-  build)
-    ZIP_NAME="build-worker"
-    ;;
-  *)
-    echo -e "${YELLOW}Error: Unknown component: $COMPONENT${NC}"
-    echo "Valid components: router, echo, deploy, status, build"
-    exit 1
-    ;;
-esac
+# Validate and get component info
+if ! validate_component "$COMPONENT"; then
+  show_component_error "$COMPONENT"
+  exit 1
+fi
+
+ZIP_NAME=$(get_zip_name "$COMPONENT")
 
 echo -e "${BLUE}Building $COMPONENT...${NC}"
 

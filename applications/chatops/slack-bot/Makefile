@@ -54,8 +54,13 @@ help:
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
 	@echo "  make test-integration       - Run integration tests"
-	@echo "  make test-router-lambda     - Test router lambda integration"
-	@echo "  make test-echo-worker       - Test echo worker integration"
+	@echo "  make test-<name>            - Run specific integration test"
+	@echo ""
+	@echo "$(GREEN)Code Quality:$(NC)"
+	@echo "  make lint                   - Run ESLint"
+	@echo "  make lint-fix               - Run ESLint with auto-fix"
+	@echo "  make type-check             - Run TypeScript type check"
+	@echo "  make ci                     - Run all CI checks"
 	@echo ""
 	@echo "$(GREEN)Utilities:$(NC)"
 	@echo "  make clean                  - Clean build artifacts"
@@ -91,7 +96,7 @@ verify-aws:
 # Build
 # -----------------------------------------------------------------------------
 
-# Valid components
+# Valid components (must match scripts/component-config.sh)
 COMPONENTS := router echo deploy status build
 
 build: clean-dist
@@ -170,15 +175,32 @@ test-integration:
 	cd $(SANDBOX_ROOT)/tests/integration && \
 		./test-localstack.sh
 
-test-router-lambda:
-	@echo "$(BLUE)Testing router lambda integration...$(NC)"
-	cd $(SANDBOX_ROOT)/tests/integration && \
-		./test-router-lambda.sh
+# Pattern rule for integration tests
+# Expects test script at $(SANDBOX_ROOT)/tests/integration/test-%.sh
+test-%: FORCE
+	@echo "$(BLUE)Testing $* integration...$(NC)"
+	@cd $(SANDBOX_ROOT)/tests/integration && \
+		(./test-$*.sh || echo "$(YELLOW)Note: Create test-$*.sh first$(NC)")
 
-test-echo-worker:
-	@echo "$(BLUE)Testing echo worker integration...$(NC)"
-	cd $(SANDBOX_ROOT)/tests/integration && \
-		./test-echo-worker.sh || echo "$(YELLOW)Note: Create test-echo-worker.sh first$(NC)"
+# -----------------------------------------------------------------------------
+# Code Quality
+# -----------------------------------------------------------------------------
+
+lint:
+	@echo "$(BLUE)Running ESLint...$(NC)"
+	npm run lint
+
+lint-fix:
+	@echo "$(BLUE)Running ESLint with auto-fix...$(NC)"
+	npm run lint:fix
+
+type-check:
+	@echo "$(BLUE)Running TypeScript type check...$(NC)"
+	npm run type-check
+
+ci:
+	@echo "$(BLUE)Running CI checks (lint + type-check + test:coverage + build)...$(NC)"
+	npm run ci
 
 # -----------------------------------------------------------------------------
 # Clean

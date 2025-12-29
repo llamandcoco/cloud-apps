@@ -17,36 +17,23 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Load component configuration
+source "$SCRIPT_DIR/component-config.sh"
+
 if [ -z "$COMPONENT" ]; then
   echo -e "${YELLOW}Error: Component name required${NC}"
   echo "Usage: $0 <component-name> [--local]"
-  echo "Valid components: router, echo, deploy, status, build"
+  echo "Valid components: $VALID_COMPONENTS"
   exit 1
 fi
 
-# Component to Terragrunt directory mapping
-case "$COMPONENT" in
-  router)
-    TG_PATH="slack-router-lambda"
-    ;;
-  echo)
-    TG_PATH="chatbot-echo-worker"
-    ;;
-  deploy)
-    TG_PATH="chatbot-deploy-worker"
-    ;;
-  status)
-    TG_PATH="chatbot-status-worker"
-    ;;
-  build)
-    TG_PATH="chatbot-build-worker"
-    ;;
-  *)
-    echo -e "${YELLOW}Error: Unknown component: $COMPONENT${NC}"
-    echo "Valid components: router, echo, deploy, status, build"
-    exit 1
-    ;;
-esac
+# Validate and get component info
+if ! validate_component "$COMPONENT"; then
+  show_component_error "$COMPONENT"
+  exit 1
+fi
+
+TG_PATH=$(get_tg_path "$COMPONENT")
 
 # Determine deploy mode
 if [ "$DEPLOY_MODE" = "--local" ]; then
