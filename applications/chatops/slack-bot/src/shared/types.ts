@@ -41,4 +41,5 @@ export interface WorkerMessage {
   user_id: string;
   user_name: string;
   channel_id: string;
+  correlation_id?: string; // For request tracing (Slack timestamp)
 }
