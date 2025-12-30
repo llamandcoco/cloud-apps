@@ -107,7 +107,7 @@ export async function getGitHubToken(): Promise<string> {
       expiresAt: Date.now() + CACHE_TTL
     });
 
-    logger.info('GitHub PAT retrieved successfully', { parameterPath: '/laco/cmn/github/pat/cloud-apps' });
+    logger.info('GitHub PAT retrieved successfully', { parameterPath });
     return value;
   } catch (error) {
     logger.error('Failed to retrieve GitHub PAT', error as Error, { parameterPath });
