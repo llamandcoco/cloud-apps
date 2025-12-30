@@ -92,7 +92,7 @@ export async function getGitHubToken(): Promise<string> {
       throw new Error(`GitHub PAT not found: ${parameterPath}`);
     }
 
-    logger.info('GitHub PAT retrieved successfully');
+    logger.info('GitHub PAT retrieved successfully', { parameterPath: '/laco/cmn/github/pat/cloud-apps' });
     return value;
   } catch (error) {
     logger.error('Failed to retrieve GitHub PAT', error as Error, { parameterPath });
