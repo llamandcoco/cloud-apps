@@ -5,8 +5,7 @@ import axios from 'axios';
 import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
-// TODO: Re-enable when getParameter is implemented
-// import { getParameter } from '../../shared/secrets';
+import { getGitHubToken } from '../../shared/secrets';
 
 interface BuildCommand {
   component: string;  // router, echo, deploy, status, all
@@ -50,14 +49,8 @@ async function triggerGitHubWorkflow(params: {
   response_url: string;
   user: string;
 }): Promise<void> {
-  // TODO: Re-enable when getParameter is implemented
   // Get GitHub token from Parameter Store
-  // const githubToken = await getParameter('/laco/cmn/github/pat/cloud-apps');
-  const githubToken = process.env.GITHUB_TOKEN;
-
-  if (!githubToken) {
-    throw new Error('GITHUB_TOKEN environment variable is required (temporary workaround until getParameter is implemented)');
-  }
+  const githubToken = await getGitHubToken();
 
   const owner = 'llamandcoco';
   const repo = 'cloud-apps';

@@ -71,3 +71,40 @@ export async function getSlackBotToken(): Promise<string> {
 export async function getSlackSigningSecret(): Promise<string> {
   return getSecret('slack/signing-secret');
 }
+
+export async function getGitHubToken(): Promise<string> {
+  // For local development, use environment variable
+  if (config.get().isLocal) {
+    const value = process.env.GITHUB_PAT_CLOUD_APPS;
+    if (value) {
+      logger.debug('GitHub PAT retrieved from environment');
+      return value;
+    }
+  }
+
+  // GitHub PAT is stored in common environment, not environment-specific
+  // Use direct parameter path instead of getSecret() which adds environment prefix
+  const parameterPath = '/laco/cmn/github/pat/cloud-apps';
+
+  try {
+    logger.debug('Fetching GitHub PAT from Parameter Store', { parameterPath });
+
+    const response = await ssmClient.send(
+      new GetParameterCommand({
+        Name: parameterPath,
+        WithDecryption: true
+      })
+    );
+
+    const value = response.Parameter?.Value;
+    if (!value) {
+      throw new Error(`GitHub PAT not found: ${parameterPath}`);
+    }
+
+    logger.info('GitHub PAT retrieved successfully');
+    return value;
+  } catch (error) {
+    logger.error('Failed to retrieve GitHub PAT', error as Error, { parameterPath });
+    throw error;
+  }
+}
