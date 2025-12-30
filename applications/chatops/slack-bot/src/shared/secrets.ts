@@ -73,6 +73,15 @@ export async function getSlackSigningSecret(): Promise<string> {
 }
 
 export async function getGitHubToken(): Promise<string> {
+  const cacheKey = 'github-pat';
+  
+  // Check cache first
+  const cached = secretCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    logger.debug('GitHub PAT retrieved from cache');
+    return cached.value;
+  }
+
   // GitHub PAT is stored in common environment, not environment-specific
   // Use direct parameter path instead of getSecret() which adds environment prefix
   const parameterPath = '/laco/cmn/github/pat/cloud-apps';
@@ -92,7 +101,13 @@ export async function getGitHubToken(): Promise<string> {
       throw new Error(`GitHub PAT not found: ${parameterPath}`);
     }
 
-    logger.info('GitHub PAT retrieved successfully', { parameterPath: '/laco/cmn/github/pat/cloud-apps' });
+    // Cache the GitHub PAT
+    secretCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + CACHE_TTL
+    });
+
+    logger.info('GitHub PAT retrieved successfully', { parameterPath });
     return value;
   } catch (error) {
     logger.error('Failed to retrieve GitHub PAT', error as Error, { parameterPath });
