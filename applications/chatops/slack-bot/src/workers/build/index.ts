@@ -6,6 +6,7 @@ import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
 import { getGitHubToken } from '../../shared/secrets';
+import { buildLockManager } from '../../shared/build-lock';
 
 interface BuildCommand {
   component: string;  // router, echo, deploy, status, all
@@ -136,43 +137,116 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         environment
       });
 
-      // Send immediate acknowledgment
-      await sendSlackResponse(message.response_url, {
-        response_type: 'in_channel',
-        text: `🔨 Building ${component}...`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `🔨 *Building ${component}*\n\nEnvironment: \`${environment}\`\nRequested by: <@${message.user_id}>\n\nTriggering GitHub Actions workflow...\nThis will take ~2 minutes`
-            }
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: '⏳ Build in progress...'
-              }
-            ]
-          }
-        ]
-      });
-
-      // Trigger GitHub Actions workflow
-      await triggerGitHubWorkflow({
+      // Attempt to acquire distributed lock
+      const lockResult = await buildLockManager.acquireLock({
+        command: 'build',
         component,
         environment,
-        response_url: message.response_url,
-        user: message.user_name
+        userId: message.user_id,
+        userName: message.user_name,
+        correlationId,
       });
 
-      messageLogger.info('Build command processed successfully', {
-        duration: Date.now() - startTime,
+      if (!lockResult.acquired) {
+        // Lock already held by another user - notify and skip
+        const lockedSince = lockResult.lockedAt
+          ? new Date(lockResult.lockedAt)
+          : null;
+        const timeSince = lockedSince
+          ? Math.floor((Date.now() - lockedSince.getTime()) / 1000)
+          : null;
+
+        await sendSlackResponse(message.response_url, {
+          response_type: 'ephemeral',
+          text: `⚠️ Build already in progress`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `⚠️ *Build Already In Progress*\n\nA build for \`${component}\` (${environment}) is already running.\n\n` +
+                  `Started by: ${lockResult.lockedByName || 'Unknown'}\n` +
+                  (timeSince ? `Started: ${timeSince}s ago\n` : '') +
+                  `\nPlease wait for the current build to complete.`
+              }
+            }
+          ]
+        });
+
+        messageLogger.info('Build skipped - lock held by another user', {
+          component,
+          environment,
+          requestedBy: message.user_id,
+          lockedBy: lockResult.lockedBy,
+          lockedByName: lockResult.lockedByName,
+        });
+
+        // Don't add to failures - this is expected behavior
+        continue;
+      }
+
+      // Lock acquired - proceed with build
+      messageLogger.info('Lock acquired - proceeding with build', {
         component,
-        environment
+        environment,
       });
+
+      try {
+        // Send immediate acknowledgment
+        await sendSlackResponse(message.response_url, {
+          response_type: 'in_channel',
+          text: `🔨 Building ${component}...`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `🔨 *Building ${component}*\n\nEnvironment: \`${environment}\`\nRequested by: <@${message.user_id}>\n\nTriggering GitHub Actions workflow...\nThis will take ~2 minutes`
+              }
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: '⏳ Build in progress...'
+                }
+              ]
+            }
+          ]
+        });
+
+        // Trigger GitHub Actions workflow
+        await triggerGitHubWorkflow({
+          component,
+          environment,
+          response_url: message.response_url,
+          user: message.user_name
+        });
+
+        // Release lock on success
+        await buildLockManager.releaseLock(
+          'build',
+          component,
+          environment,
+          'COMPLETED'
+        );
+
+        messageLogger.info('Build command processed successfully', {
+          duration: Date.now() - startTime,
+          component,
+          environment
+        });
+      } catch (buildError) {
+        // Release lock on failure
+        await buildLockManager.releaseLock(
+          'build',
+          component,
+          environment,
+          'FAILED'
+        );
+        throw buildError; // Re-throw to be caught by outer catch
+      }
 
     } catch (error) {
       const duration = Date.now() - startTime;
