@@ -74,12 +74,21 @@ export async function getSlackSigningSecret(): Promise<string> {
 
 export async function getGitHubToken(): Promise<string> {
   const cacheKey = 'github-pat';
-  
+
   // Check cache first
   const cached = secretCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     logger.debug('GitHub PAT retrieved from cache');
     return cached.value;
+  }
+
+  // For local development, use environment variable
+  if (config.get().isLocal) {
+    const value = process.env.GITHUB_PAT_CLOUD_APPS;
+    if (value) {
+      logger.debug('GitHub PAT retrieved from environment');
+      return value;
+    }
   }
 
   // GitHub PAT is stored in common environment, not environment-specific
