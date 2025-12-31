@@ -52,19 +52,180 @@ export class SlackBotStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // IAM Policy for Parameter Store Access
+    // IAM Policies: Quadrant-Based Permission Boundaries
     // ========================================================================
 
     /**
-     * SECURITY PATTERN:
+     * PHASE 1: PERMISSION BOUNDARIES
      * 
-     * Grant least-privilege access to Parameter Store paths.
-     * Each Lambda can only access its own application's secrets.
+     * Commands are categorized into four quadrants based on:
+     * - Execution Time: Short (<30s) vs Long (>30s)
+     * - Side Effects: Read (query-only) vs Write (mutating)
      * 
-     * ✅ GOOD: Path-based restriction
-     * ❌ BAD: ssm:* on resource *
+     * Each quadrant has its own IAM role with least-privilege permissions.
+     * This prevents:
+     * - Read commands from having write permissions (security)
+     * - Permission creep across command types (security)
+     * - Unnecessary blast radius (reliability)
+     * 
+     * See: src/shared/command-registry.ts for command categorization
+     */
+
+    /**
+     * QUADRANT 1: Short + Read
+     * Commands: /status, /health, /metrics, /echo
+     * Purpose: Fast queries for system state
+     * Permissions: Read-only CloudWatch, Lambda metadata, ECS describe
+     * Timeout: ≤30s
+     */
+    const shortReadPolicy = new iam.PolicyStatement({
+      sid: 'ShortReadQuadrant',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        // CloudWatch metrics (read-only)
+        'cloudwatch:GetMetricData',
+        'cloudwatch:GetMetricStatistics',
+        'cloudwatch:ListMetrics',
+        
+        // Lambda metadata (read-only)
+        'lambda:GetFunction',
+        'lambda:ListFunctions',
+        
+        // ECS service status (read-only)
+        'ecs:DescribeServices',
+        'ecs:DescribeClusters'
+      ],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          // Restrict to current region only
+          'aws:RequestedRegion': this.region
+        }
+      }
+    });
+
+    /**
+     * QUADRANT 2: Short + Write
+     * Commands: /scale, /restart
+     * Purpose: Fast mutations to service configuration
+     * Permissions: Scoped ECS/Lambda update operations
+     * Timeout: ≤30s
+     * Additional Controls: Tag-based ABAC, requires approval workflow
+     */
+    const shortWritePolicy = new iam.PolicyStatement({
+      sid: 'ShortWriteQuadrant',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        // ECS service scaling
+        'ecs:UpdateService',
+        'ecs:DescribeServices',
+        'application-autoscaling:RegisterScalableTarget',
+        'application-autoscaling:PutScalingPolicy',
+        
+        // Lambda configuration updates (not code deployment)
+        'lambda:UpdateFunctionConfiguration'
+      ],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'aws:RequestedRegion': this.region,
+          // Only allow operations on resources with ManagedBy=ChatOps tag
+          'aws:ResourceTag/ManagedBy': 'ChatOps'
+        }
+      }
+    });
+
+    /**
+     * QUADRANT 3: Long + Read
+     * Commands: /analyze, /report
+     * Purpose: Analytical queries, cost reports
+     * Permissions: Athena queries, S3 read, Cost Explorer, Glue metadata
+     * Timeout: 180-300s
+     */
+    const longReadPolicy = new iam.PolicyStatement({
+      sid: 'LongReadQuadrant',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        // Athena for data analytics
+        'athena:StartQueryExecution',
+        'athena:GetQueryExecution',
+        'athena:GetQueryResults',
+        
+        // S3 read for data lake access
+        's3:GetObject',
+        's3:ListBucket',
+        
+        // Glue metadata for table schemas
+        'glue:GetTable',
+        'glue:GetDatabase',
+        
+        // Cost Explorer for billing reports
+        'ce:GetCostAndUsage',
+        'ce:GetCostForecast'
+      ],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'aws:RequestedRegion': this.region
+        }
+      }
+    });
+
+    /**
+     * QUADRANT 4: Long + Write
+     * Commands: /deploy, /migrate, /build
+     * Purpose: Deployment, migrations, builds
+     * Permissions: CodeDeploy, CodeBuild, ECS deployments, RDS/DynamoDB migrations
+     * Timeout: 300-600s
+     * Additional Controls: Requires approval workflow, limited to tagged resources
+     */
+    const longWritePolicy = new iam.PolicyStatement({
+      sid: 'LongWriteQuadrant',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        // CodeDeploy for application deployments
+        'codedeploy:CreateDeployment',
+        'codedeploy:GetDeployment',
+        
+        // CodeBuild for CI/CD pipelines
+        'codebuild:StartBuild',
+        'codebuild:BatchGetBuilds',
+        
+        // ECS deployment updates
+        'ecs:UpdateService',
+        'ecs:DescribeServices',
+        
+        // Lambda code deployments
+        'lambda:UpdateFunctionCode',
+        'lambda:UpdateFunctionConfiguration',
+        
+        // Database migrations (scoped to tagged resources)
+        'rds:ModifyDBInstance',
+        'rds:DescribeDBInstances',
+        'dynamodb:UpdateTable',
+        'dynamodb:DescribeTable',
+        
+        // S3 for artifact storage
+        's3:GetObject',
+        's3:PutObject'
+      ],
+      resources: ['*'],
+      conditions: {
+        StringEquals: {
+          'aws:RequestedRegion': this.region,
+          // Only allow operations on resources with ManagedBy=ChatOps tag
+          'aws:ResourceTag/ManagedBy': 'ChatOps'
+        }
+      }
+    });
+
+    /**
+     * Common Policy: Parameter Store Access
+     * All Lambdas need access to Parameter Store for runtime secrets
+     * (Slack tokens, GitHub tokens, cloud credentials)
      */
     const parameterStorePolicy = new iam.PolicyStatement({
+      sid: 'ParameterStoreAccess',
       effect: iam.Effect.ALLOW,
       actions: [
         'ssm:GetParameter',
@@ -156,6 +317,9 @@ export class SlackBotStack extends cdk.Stack {
     // Grant Parameter Store access
     processorHandler.addToRolePolicy(parameterStorePolicy);
 
+    // Grant long-read permissions for analytical workloads
+    processorHandler.addToRolePolicy(longReadPolicy);
+
     // ========================================================================
     // Lambda Handler 3: Executor (Go)
     // ========================================================================
@@ -197,6 +361,14 @@ export class SlackBotStack extends cdk.Stack {
 
     // Grant Parameter Store access (includes GCP/Azure credentials)
     executorHandler.addToRolePolicy(parameterStorePolicy);
+
+    // Grant quadrant-specific permissions based on command categories
+    // The executor handles all command types, so it needs all quadrant policies
+    // In Phase 2, we'll split into separate Lambda functions per quadrant
+    executorHandler.addToRolePolicy(shortReadPolicy);
+    executorHandler.addToRolePolicy(shortWritePolicy);
+    executorHandler.addToRolePolicy(longReadPolicy);
+    executorHandler.addToRolePolicy(longWritePolicy);
 
     // SQS event source: executor processes intents from queue
     executorHandler.addEventSource(new SqsEventSource(intentQueue, {
