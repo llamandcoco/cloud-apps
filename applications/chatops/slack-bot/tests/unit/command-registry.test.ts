@@ -266,7 +266,9 @@ describe('Command Registry', () => {
             p.includes('Delete') || 
             p.includes('Put') ||
             p.includes('Modify') ||
-            p.includes('Start') && p.includes('Build') // StartBuild is a write action
+            p.includes('StartBuild') || // CodeBuild StartBuild is a write action
+            p.includes('CreateDeployment') // Deployment creation is a write action
+            // Note: athena:StartQueryExecution is read-only (queries don't mutate data)
           );
           
           expect(writeActions).toHaveLength(0);
@@ -288,7 +290,8 @@ describe('Command Registry', () => {
             p.includes('Delete') || 
             p.includes('Put') ||
             p.includes('Modify') ||
-            p.includes('Start')
+            p.includes('StartBuild') || // Specific write actions
+            p.includes('StartDeploy')
           );
           
           expect(hasWritePermission).toBe(true);
