@@ -1,12 +1,36 @@
-// Deploy Worker Lambda - Handles deployment commands
+// Deploy Worker Lambda - Handles both manual and scheduled deployment requests
 
-import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+import { SQSEvent, SQSBatchResponse, EventBridgeEvent } from 'aws-lambda';
 import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
+import { handleScheduledDeployment } from './scheduled-handler';
+import { handleManualDeployment } from './manual-handler';
 
-export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
-  logger.info('Deploy worker invoked', {
+type LambdaEvent = SQSEvent | EventBridgeEvent<string, any>;
+
+/**
+ * Main handler - Routes to appropriate sub-handler based on event type
+ */
+export async function handler(event: LambdaEvent): Promise<SQSBatchResponse | void> {
+  logger.info('Deploy worker invoked', { eventSource: getEventSource(event) });
+
+  // Check if this is an EventBridge scheduled event
+  if (isEventBridgeEvent(event)) {
+    logger.info('Handling scheduled deployment from EventBridge');
+    await handleScheduledDeployment(event as EventBridgeEvent<string, any>);
+    return;
+  }
+
+  // Otherwise, handle as SQS event (manual deployment)
+  return await handleSQSEvent(event as SQSEvent);
+}
+
+/**
+ * Handle SQS events (manual deployments from Slack)
+ */
+async function handleSQSEvent(event: SQSEvent): Promise<SQSBatchResponse> {
+  logger.info('Handling manual deployment from SQS', {
     recordCount: event.Records.length
   });
 
@@ -15,76 +39,7 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   for (const record of event.Records) {
     try {
       const message: WorkerMessage = JSON.parse(record.body);
-
-      logger.info('Processing deploy command', {
-        text: message.text,
-        user: message.user_name
-      });
-
-      // Parse deployment target from text
-      const target = message.text.trim() || 'default';
-
-      // Send initial response
-      await sendSlackResponse(message.response_url, {
-        response_type: 'in_channel',
-        text: `:rocket: Starting deployment to \`${target}\`...`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `:rocket: *Deployment Started*\nTarget: \`${target}\`\nRequested by: <@${message.user_id}>`
-            }
-          }
-        ]
-      });
-
-      // Simulate deployment process
-      const steps = [
-        { name: 'Validating configuration', duration: 2000 },
-        { name: 'Building application', duration: 3000 },
-        { name: 'Running tests', duration: 2000 },
-        { name: 'Deploying to AWS', duration: 4000 },
-        { name: 'Verifying deployment', duration: 2000 }
-      ];
-
-      for (const [index, step] of steps.entries()) {
-        logger.info(`Deployment step: ${step.name}`);
-        await new Promise(resolve => setTimeout(resolve, step.duration));
-
-        // Send progress update
-        const progress = Math.round(((index + 1) / steps.length) * 100);
-        await sendSlackResponse(message.response_url, {
-          response_type: 'in_channel',
-          text: `[${progress}%] ${step.name}...`
-        });
-      }
-
-      // Send final success message
-      await sendSlackResponse(message.response_url, {
-        response_type: 'in_channel',
-        text: `:white_check_mark: Deployment to \`${target}\` completed successfully!`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `:white_check_mark: *Deployment Successful*\nTarget: \`${target}\`\nDuration: ${steps.reduce((sum, s) => sum + s.duration, 0) / 1000}s`
-            }
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `Deployed by <@${message.user_id}> | ${new Date().toISOString()}`
-              }
-            ]
-          }
-        ]
-      });
-
-      logger.info('Deployment completed');
+      await handleManualDeployment(message);
     } catch (error) {
       logger.error('Failed to process deploy command', error as Error, {
         messageId: record.messageId
@@ -107,4 +62,21 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   }
 
   return { batchItemFailures };
+}
+
+/**
+ * Type guard to check if event is from EventBridge
+ */
+function isEventBridgeEvent(event: LambdaEvent): boolean {
+  return 'source' in event && 'detail-type' in event;
+}
+
+/**
+ * Get event source for logging
+ */
+function getEventSource(event: LambdaEvent): string {
+  if (isEventBridgeEvent(event)) {
+    return 'EventBridge';
+  }
+  return 'SQS';
 }
