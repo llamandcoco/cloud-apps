@@ -253,6 +253,18 @@ describe('Command Registry', () => {
   });
 
   describe('Permission boundary validation', () => {
+    // Helper to identify write actions
+    const isWriteAction = (permission: string): boolean => {
+      return permission.includes('Create') || 
+        permission.includes('Update') || 
+        permission.includes('Delete') || 
+        permission.includes('Put') ||
+        permission.includes('Modify') ||
+        permission.includes('StartBuild') || // CodeBuild StartBuild is a write action
+        permission.includes('CreateDeployment'); // Deployment creation is a write action
+        // Note: athena:StartQueryExecution is read-only (queries don't mutate data)
+    };
+
     test('read commands should only have read permissions', () => {
       const readCategories: CommandCategory[] = ['short-read', 'long-read'];
       
@@ -260,17 +272,7 @@ describe('Command Registry', () => {
         const commands = getCommandsByCategory(category);
         
         commands.forEach(cmd => {
-          const writeActions = cmd.permissions.filter(p => 
-            p.includes('Create') || 
-            p.includes('Update') || 
-            p.includes('Delete') || 
-            p.includes('Put') ||
-            p.includes('Modify') ||
-            p.includes('StartBuild') || // CodeBuild StartBuild is a write action
-            p.includes('CreateDeployment') // Deployment creation is a write action
-            // Note: athena:StartQueryExecution is read-only (queries don't mutate data)
-          );
-          
+          const writeActions = cmd.permissions.filter(isWriteAction);
           expect(writeActions).toHaveLength(0);
         });
       });
@@ -284,16 +286,7 @@ describe('Command Registry', () => {
         
         commands.forEach(cmd => {
           // Write commands should have at least one write permission
-          const hasWritePermission = cmd.permissions.some(p => 
-            p.includes('Create') || 
-            p.includes('Update') || 
-            p.includes('Delete') || 
-            p.includes('Put') ||
-            p.includes('Modify') ||
-            p.includes('StartBuild') || // Specific write actions
-            p.includes('StartDeploy')
-          );
-          
+          const hasWritePermission = cmd.permissions.some(isWriteAction);
           expect(hasWritePermission).toBe(true);
         });
       });
