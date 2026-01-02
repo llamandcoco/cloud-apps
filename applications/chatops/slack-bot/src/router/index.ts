@@ -19,19 +19,34 @@ const eventBridgeClient = new EventBridgeClient({
 });
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const apiGatewayStartTime = Date.now();
+
   logger.info('Router Lambda invoked', {
     path: event.path,
-    httpMethod: event.httpMethod
+    httpMethod: event.httpMethod,
+    startTime: apiGatewayStartTime
   });
 
   try {
+    // Debug: Log request details for signature troubleshooting
+    const timestamp = event.headers['x-slack-request-timestamp'] || event.headers['X-Slack-Request-Timestamp'] || '';
+    const signature = event.headers['x-slack-signature'] || event.headers['X-Slack-Signature'] || '';
+
+    logger.info('Request signature details', {
+      timestamp,
+      signaturePreview: signature.substring(0, 20) + '...',
+      bodyLength: (event.body || '').length,
+      bodyPreview: (event.body || '').substring(0, 100),
+      headerKeys: Object.keys(event.headers)
+    });
+
     // 1. Verify Slack signature
     const signingSecret = await getSlackSigningSecret();
     const isValid = await verifySlackSignature(
       signingSecret,
       {
-        'x-slack-request-timestamp': event.headers['x-slack-request-timestamp'] || event.headers['X-Slack-Request-Timestamp'] || '',
-        'x-slack-signature': event.headers['x-slack-signature'] || event.headers['X-Slack-Signature'] || ''
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': signature
       },
       event.body || ''
     );
@@ -46,6 +61,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // 2. Parse Slack command
     const params = parseSlackCommand(event.body || '');
+    // Use Slack timestamp as correlation_id for E2E tracing
+    const correlationId = timestamp || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     const slackCommand: SlackCommand = {
       command: params.command || '',
       text: params.text || '',
@@ -56,7 +74,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       channel_name: params.channel_name || '',
       team_id: params.team_id || '',
       team_domain: params.team_domain || '',
-      trigger_id: params.trigger_id || ''
+      trigger_id: params.trigger_id || '',
+      correlation_id: correlationId,
+      api_gateway_start_time: apiGatewayStartTime
     };
 
     logger.info('Slack command received', {

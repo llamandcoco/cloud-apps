@@ -11,6 +11,8 @@ export interface SlackCommand {
   team_id: string;
   team_domain: string;
   trigger_id: string;
+  correlation_id?: string;  // Slack timestamp for E2E tracing
+  api_gateway_start_time?: number;  // API Gateway request start time (ms) for E2E latency calculation
 }
 
 export interface SlackResponse {
@@ -42,4 +44,5 @@ export interface WorkerMessage {
   user_name: string;
   channel_id: string;
   correlation_id?: string; // For request tracing (Slack timestamp)
+  api_gateway_start_time?: number;  // API Gateway request start time (ms) for E2E latency calculation
 }

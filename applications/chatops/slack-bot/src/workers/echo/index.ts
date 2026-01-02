@@ -95,9 +95,26 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         subsegment?.close();
 
         const totalDuration = Date.now() - startTime;
+        const e2eDuration = message.api_gateway_start_time
+          ? Date.now() - message.api_gateway_start_time
+          : undefined;
+
+        // Log structured performance metrics for CloudWatch Insights analysis
+        if (e2eDuration && correlationId) {
+          const queueWaitMs = e2eDuration - totalDuration;
+          logger.info('Performance metrics', {
+            correlationId,
+            totalE2eMs: e2eDuration,
+            workerDurationMs: totalDuration,
+            queueWaitMs: Math.max(0, queueWaitMs),
+            syncResponseMs: syncDuration,
+            asyncResponseMs: asyncDuration
+          });
+        }
 
         messageLogger.info('Echo command processed successfully', {
           totalDuration,
+          e2eDuration,
         });
       } catch (error) {
         subsegment?.addError(error as Error);
