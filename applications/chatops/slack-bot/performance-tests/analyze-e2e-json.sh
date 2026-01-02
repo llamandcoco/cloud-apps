@@ -42,11 +42,13 @@ query_logs() {
   # Convert milliseconds to seconds for AWS Logs API
   local start_sec=$((START_MS / 1000))
   local end_sec=$((END_MS / 1000))
+  # Add 5-minute buffer to account for log ingestion delay
+  local end_sec_buffered=$((end_sec + 300))
   
   local query_id=$(aws logs start-query \
     --log-group-name "$log_group" \
     --start-time $start_sec \
-    --end-time $end_sec \
+    --end-time $end_sec_buffered \
     --region $REGION \
     --query-string "$query_string" \
     --query 'queryId' \
@@ -62,6 +64,11 @@ query_logs() {
 }
 
 # 1. Router Lambda Performance
+# Note: Using REPORT filter which counts only completed invocations
+# If count differs from Artillery requests, check CloudWatch for:
+# - Lambda initialization errors (no REPORT logged)
+# - Timeouts (REPORT may be delayed beyond query window)
+# - API Gateway errors (request never reached Lambda)
 echo "Querying Router Lambda metrics..." >&2
 ROUTER_METRICS=$(query_logs \
   "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
@@ -69,6 +76,10 @@ ROUTER_METRICS=$(query_logs \
   "router")
 
 # 2. Worker Lambda Performance
+# Note: Using REPORT filter which counts only completed invocations
+# Difference between Router and Worker counts indicates:
+# - SQS message loss or DLQ routing
+# - Worker timeouts or initialization failures
 echo "Querying Worker Lambda metrics..." >&2
 WORKER_METRICS=$(query_logs \
   "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \

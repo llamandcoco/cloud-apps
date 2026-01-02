@@ -243,11 +243,48 @@ const html = `<!doctype html>
       h1 {
         margin: 0 0 8px;
         font-size: 32px;
-        letter-spacing: -0.8px;
+        letter-spacing: -0.5px;
+      }
+      h2 {
+        font-weight: 600;
+        letter-spacing: -0.3px;
       }
       .meta {
         color: var(--muted);
         font-size: 13px;
+      }
+      .toc {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 24px;
+        box-shadow: 0 8px 20px rgba(31, 42, 68, 0.06);
+      }
+      .toc h3 {
+        margin: 0 0 12px;
+        font-size: 13px;
+        text-transform: uppercase;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .toc ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .toc li {
+        margin: 6px 0;
+      }
+      .toc a {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 13px;
+        transition: color 0.2s ease;
+      }
+      .toc a:hover {
+        color: var(--accent-2);
+        text-decoration: underline;
       }
       .container {
         padding: 20px 24px 40px;
@@ -281,11 +318,11 @@ const html = `<!doctype html>
         box-shadow: 0 18px 36px rgba(31, 42, 68, 0.12);
       }
       .card .label {
-        font-size: 12px;
+        font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
         color: var(--muted);
         margin-bottom: 8px;
+        font-weight: 500;
       }
       .card .value {
         font-size: 20px;
@@ -300,13 +337,27 @@ const html = `<!doctype html>
         grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
         gap: 16px;
       }
+      .grid.chart-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
       @media (max-width: 1200px) {
         .grid {
           grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         }
+        .grid.chart-grid {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 900px) {
+        .grid.chart-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
       @media (max-width: 768px) {
         .grid {
+          grid-template-columns: 1fr;
+        }
+        .grid.chart-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -359,8 +410,8 @@ const html = `<!doctype html>
       .table th {
         font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
         color: var(--muted);
+        font-weight: 600;
       }
       .table th[data-sort] {
         cursor: pointer;
@@ -414,53 +465,92 @@ const html = `<!doctype html>
       <div class="meta" id="meta"></div>
     </header>
     <div class="container">
-      <section class="cards">
+      <div class="toc">
+        <h3>📋 Table of Contents</h3>
+        <ul>
+          <li><a href="#section-1">1. Test Configuration</a></li>
+          <li><a href="#section-2">2. Summary</a></li>
+          <li><a href="#section-3">3. Client-Side Metrics</a></li>
+          <li><a href="#section-4">4. Server-Side Metrics</a></li>
+          <li><a href="#section-5">5. Raw Data (Evidence)</a></li>
+        </ul>
+      </div>
+
+      <h2 style="margin: 0 0 12px; font-size: 20px;" id="section-1">1. Test Configuration</h2>
+
+      <section class="panel" style="margin-bottom: 24px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px;">
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Test Duration</div>
+            <div style="font-weight: 600;" id="testDuration"></div>
+          </div>
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total VUsers</div>
+            <div style="font-weight: 600;" id="testVUsers"></div>
+          </div>
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total Requests</div>
+            <div style="font-weight: 600;" id="testRequests"></div>
+          </div>
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Avg Request Rate</div>
+            <div style="font-weight: 600;" id="testAvgRps"></div>
+          </div>
+        </div>
+      </section>
+
+      <h2 style="margin: 24px 0 12px; font-size: 20px;" id="section-2">2. Summary</h2>
+      <section class="cards" style="margin-bottom: 24px;">
         <div class="card">
-          <div class="label">Requests</div>
+          <div class="label">Total Requests</div>
           <div class="value" id="requests"></div>
         </div>
         <div class="card">
-          <div class="label">Responses</div>
+          <div class="label">Successful Responses</div>
           <div class="value" id="responses"></div>
-        </div>
-        <div class="card">
-          <div class="label">VUsers Created</div>
-          <div class="value" id="vusersCreated"></div>
         </div>
         <div class="card">
           <div class="label">VUsers Completed</div>
           <div class="value" id="vusersCompleted"></div>
+          <div class="value small" style="color: var(--muted); margin-top: 4px;">
+            <span id="vusersFailed">0</span> failed
+          </div>
         </div>
         <div class="card">
-          <div class="label">VUsers Failed</div>
-          <div class="value" id="vusersFailed"></div>
-        </div>
-        <div class="card">
-          <div class="label">Errors</div>
+          <div class="label">Error Rate</div>
           <div class="value" id="errors"></div>
           <div class="value small" id="errorRate"></div>
         </div>
-        <div class="card">
-          <div class="label">Avg RPS</div>
-          <div class="value" id="avgRps"></div>
+      </section>
+
+      <h2 style="margin: 24px 0 12px; font-size: 20px;" id="section-3">3. Client-Side Metrics</h2>
+      <div style="font-size: 13px; color: var(--muted); margin-bottom: 16px; padding: 12px; background: rgba(40, 86, 247, 0.05); border-left: 3px solid var(--accent); border-radius: 4px;">
+        <strong>Measurement Scope:</strong> HTTP request sent from client → Response received by client<br/>
+        <strong>Includes:</strong> Network latency + API Gateway processing + Lambda cold start + Execution time
+      </div>
+
+      <section class="cards" style="margin-bottom: 16px;">
+        <div class="card" style="border: 2px solid var(--accent);">
+          <div class="label">Median Latency</div>
+          <div class="value" id="clientMedian"></div>
         </div>
-        <div class="card">
-          <div class="label">Duration</div>
-          <div class="value" id="duration"></div>
-        </div>
-        <div class="card">
+        <div class="card" style="border: 2px solid var(--accent);">
           <div class="label">P95 Latency</div>
-          <div class="value" id="p95"></div>
+          <div class="value" id="clientP95"></div>
         </div>
-        <div class="card">
+        <div class="card" style="border: 2px solid var(--accent);">
           <div class="label">P99 Latency</div>
-          <div class="value" id="p99"></div>
+          <div class="value" id="clientP99"></div>
+        </div>
+        <div class="card" style="border: 2px solid var(--accent);">
+          <div class="label">Max Latency</div>
+          <div class="value" id="clientMax"></div>
         </div>
       </section>
 
-      <section class="grid">
-        <div class="panel chart-panel">
-          <h2>Response Time (ms)</h2>
+      <section class="grid chart-grid">
+        <div class="panel chart-panel" style="grid-column: span 2;">
+          <h2>Client Response Time (HTTP Round-Trip)</h2>
           <div class="chart-controls" id="latencyControls">
             <label><input type="checkbox" data-series="median" checked /> Median</label>
             <label><input type="checkbox" data-series="p95" checked /> P95</label>
@@ -468,27 +558,27 @@ const html = `<!doctype html>
           </div>
           <canvas id="latencyChart" height="240"></canvas>
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel" style="grid-column: span 2;">
           <h2>Request Rate (req/s)</h2>
           <canvas id="rpsChart" height="240"></canvas>
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel" style="grid-column: span 2;">
           <h2>Latency Percentiles (ms)</h2>
           <canvas id="percentileChart" height="240"></canvas>
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel" style="grid-column: span 1;">
           <h2>Status Codes</h2>
           <div class="empty" id="codesEmpty">No status codes recorded.</div>
           <canvas id="codeChart" height="240"></canvas>
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel" style="grid-column: span 1;">
           <h2>Error Types</h2>
           <div class="empty" id="errorsEmpty">No errors recorded.</div>
           <canvas id="errorChart" height="240"></canvas>
         </div>
       </section>
 
-      <section class="grid">
+      <section class="grid" style="margin-top: 32px;">
         <div class="panel">
           <h2>Endpoint Latency (ms)</h2>
           <table class="table" id="endpointTable">
@@ -519,34 +609,39 @@ const html = `<!doctype html>
       </section>
 
       <!-- CloudWatch Metrics Section -->
-      <section id="cloudwatchSection" style="display: none;">
-        <h2 style="margin: 24px 0 12px; font-size: 20px;">End-to-End Performance Metrics</h2>
+      <section id="cloudwatchSection" style="display: none; margin-top: 32px;">
+        <h2 style="margin: 24px 0 12px; font-size: 20px;" id="section-4">4. Server-Side Metrics</h2>
+        <div style="font-size: 13px; color: var(--muted); margin-bottom: 16px; padding: 12px; background: rgba(249, 115, 22, 0.05); border-left: 3px solid var(--accent-3); border-radius: 4px;">
+          <strong>Measurement Scope:</strong> Lambda receives request → Processes through queue → Executes worker → Sends response<br/>
+          <strong>Includes:</strong> SQS queue wait time + Router Lambda execution + Worker Lambda execution + Response delivery<br/>
+          <strong>Note:</strong> This represents internal system processing time, independent of client network latency
+        </div>
 
         <!-- E2E Summary Cards (Highlighted) -->
         <div class="cards" style="margin-bottom: 16px;">
           <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
-            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E Requests</div>
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">Server Requests Processed</div>
             <div class="value" id="e2eInvocations">-</div>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>Total processed</div>
             </div>
           </div>
           <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
-            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E Avg Latency</div>
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">Server Avg Processing Time</div>
             <div class="value" id="e2eAvg">-</div>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>P50: <span id="e2eP50">-</span></div>
             </div>
           </div>
           <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
-            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E P95 Latency</div>
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">Server P95 Processing Time</div>
             <div class="value" id="e2eP95">-</div>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>95th percentile</div>
             </div>
           </div>
           <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
-            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E P99 Latency</div>
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">Server P99 Processing Time</div>
             <div class="value" id="e2eP99">-</div>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>99th percentile</div>
@@ -555,8 +650,8 @@ const html = `<!doctype html>
         </div>
 
         <!-- E2E Breakdown Cards -->
-        <h3 style="margin: 20px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);">E2E Component Breakdown</h3>
-        <div class="cards" style="margin-bottom: 16px;">
+        <h3 style="margin: 20px 0 8px; font-size: 13px; text-transform: uppercase; color: var(--muted); font-weight: 600;">Processing Time Breakdown</h3>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
           <div class="card">
             <div class="label">Queue Wait Time</div>
             <div class="value" id="queueWaitAvg">-</div>
@@ -575,13 +670,34 @@ const html = `<!doctype html>
         </div>
 
         <!-- Service Level Cards -->
-        <h3 style="margin: 20px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);">Service Level Metrics</h3>
-        <div class="cards">
+        <h3 style="margin: 20px 0 8px; font-size: 13px; text-transform: uppercase; color: var(--muted); font-weight: 600;">Service Level Metrics</h3>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
           <div class="card">
             <div class="label">Router Invocations</div>
             <div class="value" id="routerInvocations">-</div>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>Avg: <span id="routerAvg">-</span> ms</div>
+            </div>
+            <!-- Success message -->
+            <div id="routerSuccess" style="display: none; margin-top: 8px; padding: 6px 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #22c55e;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <span>Matches total requests</span>
+              </div>
+            </div>
+            <!-- Warning message -->
+            <div id="routerWarning" style="display: none; margin-top: 8px; padding: 6px 8px; background: rgba(255, 165, 0, 0.1); border: 1px solid rgba(255, 165, 0, 0.3); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ff9800;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span id="routerWarningText"></span>
+              </div>
             </div>
           </div>
           <div class="card">
@@ -590,31 +706,55 @@ const html = `<!doctype html>
             <div class="value small" style="color: var(--muted); margin-top: 8px;">
               <div>Avg: <span id="workerAvg">-</span> ms</div>
             </div>
+            <!-- Success message -->
+            <div id="workerSuccess" style="display: none; margin-top: 8px; padding: 6px 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #22c55e;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <span>Matches total requests</span>
+              </div>
+            </div>
+            <!-- Warning message -->
+            <div id="workerWarning" style="display: none; margin-top: 8px; padding: 6px 8px; background: rgba(255, 165, 0, 0.1); border: 1px solid rgba(255, 165, 0, 0.3); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ff9800;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span id="workerWarningText"></span>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Charts Grid -->
-        <div class="grid" style="margin-top: 16px;">
-          <div class="panel chart-panel full-width">
+        <div class="grid chart-grid" style="margin-top: 16px;">
+          <div class="panel chart-panel" style="grid-column: span 2;">
             <h2>Service Latency Distribution</h2>
             <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">
               Note: Percentiles are calculated independently per service
             </div>
             <canvas id="latencyComparisonChart" height="240"></canvas>
           </div>
-          <div class="panel chart-panel">
-            <h2>Service Latency Comparison (P50/P95/P99)</h2>
+          <div class="panel chart-panel" style="grid-column: span 2;">
+            <h2>Component Latency Comparison</h2>
+            <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">
+              Comparison of Router, Worker, and Server E2E latencies
+            </div>
             <canvas id="serviceComparisonChart" height="240"></canvas>
           </div>
-          <div class="panel chart-panel">
-            <h2>E2E Timeline Breakdown</h2>
+          <div class="panel chart-panel" style="grid-column: span 2;">
+            <h2>Server Processing Timeline</h2>
             <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">
-              Average time breakdown per request
+              Average time breakdown per request (stacked)
             </div>
             <canvas id="e2eTimelineChart" height="240"></canvas>
           </div>
-          <div class="panel chart-panel full-width">
-            <h2>E2E Component Details (ms)</h2>
+          <div class="panel" style="grid-column: span 2;">
+            <h2>Processing Component Details (ms)</h2>
             <table class="table" style="margin-top: 8px;">
               <thead>
                 <tr>
@@ -639,8 +779,8 @@ const html = `<!doctype html>
         </div>
       </section>
 
+      <h2 style="margin: 24px 0 12px; font-size: 20px;" id="section-5">5. Raw Data (Evidence)</h2>
       <section class="panel full-width">
-        <h2>Raw Aggregate Metrics</h2>
         <details>
           <summary>Counters</summary>
           <pre id="rawCounters"></pre>
@@ -693,17 +833,25 @@ const html = `<!doctype html>
         if (el) el.textContent = value;
       };
 
+      // Test Configuration
+      setText("testDuration", formatDuration(data.summary.durationMs));
+      setText("testVUsers", fmt.format(data.summary.vusersCreated));
+      setText("testRequests", fmt.format(data.summary.requests));
+      setText("testAvgRps", fmt.format(data.summary.avgRps) + " req/s");
+
+      // Summary
       setText("requests", fmt.format(data.summary.requests));
       setText("responses", fmt.format(data.summary.responses));
-      setText("vusersCreated", fmt.format(data.summary.vusersCreated));
       setText("vusersCompleted", fmt.format(data.summary.vusersCompleted));
       setText("vusersFailed", fmt.format(data.summary.vusersFailed));
       setText("errors", fmt.format(data.summary.errors));
-      setText("errorRate", "Rate: " + fmt.format(data.summary.errorRate) + "%");
-      setText("avgRps", fmt.format(data.summary.avgRps));
-      setText("duration", formatDuration(data.summary.durationMs));
-      setText("p95", msFmt.format(data.summary.p95) + " ms");
-      setText("p99", msFmt.format(data.summary.p99) + " ms");
+      setText("errorRate", fmt.format(data.summary.errorRate) + "%");
+
+      // Client-Side Metrics
+      setText("clientMedian", msFmt.format(data.summary.median) + " ms");
+      setText("clientP95", msFmt.format(data.summary.p95) + " ms");
+      setText("clientP99", msFmt.format(data.summary.p99) + " ms");
+      setText("clientMax", msFmt.format(data.summary.max) + " ms");
 
       // CloudWatch Metrics 표시
       if (data.summary.cloudwatch && Object.keys(data.summary.cloudwatch).length > 0) {
@@ -711,17 +859,60 @@ const html = `<!doctype html>
         if (cwSection) cwSection.style.display = "block";
 
         const cw = data.summary.cloudwatch;
+        const totalRequests = data.summary.requests || 0;
 
         // Router Lambda
         if (cw.router) {
-          setText("routerInvocations", fmt.format(cw.router.invocations || 0));
+          const routerInvocations = parseInt(cw.router.invocations) || 0;
+          setText("routerInvocations", fmt.format(routerInvocations));
           setText("routerAvg", msFmt.format(parseFloat(cw.router.avg_ms) || 0));
+          
+          // 성공/경고 표시
+          if (totalRequests > 0) {
+            const successEl = document.getElementById("routerSuccess");
+            const warningEl = document.getElementById("routerWarning");
+            const warningText = document.getElementById("routerWarningText");
+            
+            if (routerInvocations === totalRequests) {
+              // 일치: 성공 메시지 표시
+              if (successEl) successEl.style.display = "block";
+            } else if (routerInvocations < totalRequests) {
+              // 불일치: 경고 표시
+              const diff = totalRequests - routerInvocations;
+              const lossRate = ((diff / totalRequests) * 100).toFixed(1);
+              if (warningEl && warningText) {
+                warningEl.style.display = "block";
+                warningText.textContent = diff + " requests lost (" + lossRate + "%)";
+              }
+            }
+          }
         }
 
         // Worker Lambda
         if (cw.worker) {
-          setText("workerInvocations", fmt.format(cw.worker.invocations || 0));
+          const workerInvocations = parseInt(cw.worker.invocations) || 0;
+          setText("workerInvocations", fmt.format(workerInvocations));
           setText("workerAvg", msFmt.format(parseFloat(cw.worker.avg_ms) || 0));
+          
+          // 성공/경고 표시
+          if (totalRequests > 0) {
+            const successEl = document.getElementById("workerSuccess");
+            const warningEl = document.getElementById("workerWarning");
+            const warningText = document.getElementById("workerWarningText");
+            
+            if (workerInvocations === totalRequests) {
+              // 일치: 성공 메시지 표시
+              if (successEl) successEl.style.display = "block";
+            } else if (workerInvocations < totalRequests) {
+              // 불일치: 경고 표시
+              const diff = totalRequests - workerInvocations;
+              const lossRate = ((diff / totalRequests) * 100).toFixed(1);
+              if (warningEl && warningText) {
+                warningEl.style.display = "block";
+                warningText.textContent = diff + " requests lost (" + lossRate + "%)";
+              }
+            }
+          }
         }
 
         // E2E Metrics
@@ -759,7 +950,7 @@ const html = `<!doctype html>
               labels: ["P50", "P95", "P99"],
               datasets: [
                 {
-                  label: "Router",
+                  label: "Router Lambda",
                   data: [
                     parseFloat(cw.router.p50_ms) || 0,
                     parseFloat(cw.router.p95_ms) || 0,
@@ -770,7 +961,7 @@ const html = `<!doctype html>
                   borderWidth: 2
                 },
                 {
-                  label: "Worker",
+                  label: "Worker Lambda",
                   data: [
                     parseFloat(cw.worker.p50_ms) || 0,
                     parseFloat(cw.worker.p95_ms) || 0,
@@ -781,7 +972,7 @@ const html = `<!doctype html>
                   borderWidth: 2
                 },
                 {
-                  label: "E2E",
+                  label: "Server E2E",
                   data: [
                     parseFloat(cw.e2e.p50_e2e_ms) || 0,
                     parseFloat(cw.e2e.p95_e2e_ms) || 0,
@@ -943,7 +1134,7 @@ const html = `<!doctype html>
               labels: ["Avg", "P50", "P95", "P99"],
               datasets: [
                 {
-                  label: "Router",
+                  label: "Router Lambda",
                   data: [
                     parseFloat(cw.router.avg_ms) || 0,
                     parseFloat(cw.router.p50_ms) || 0,
@@ -958,7 +1149,7 @@ const html = `<!doctype html>
                   pointHoverRadius: 7
                 },
                 {
-                  label: "Worker",
+                  label: "Worker Lambda",
                   data: [
                     parseFloat(cw.worker.avg_ms) || 0,
                     parseFloat(cw.worker.p50_ms) || 0,
@@ -973,7 +1164,7 @@ const html = `<!doctype html>
                   pointHoverRadius: 7
                 },
                 {
-                  label: "E2E",
+                  label: "Server E2E",
                   data: [
                     parseFloat(cw.e2e.avg_e2e_ms) || 0,
                     parseFloat(cw.e2e.p50_e2e_ms) || 0,

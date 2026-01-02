@@ -96,6 +96,9 @@ else
   START_TIMESTAMP=$((END_TIMESTAMP - (START_TIME * 60)))
 fi
 
+# Add 5-minute buffer to end time to account for log ingestion delay
+END_TIMESTAMP_BUFFERED=$((END_TIMESTAMP + 300))
+
 # Initialize JSON output structure
 if [ "$OUTPUT_JSON" = true ]; then
   JSON_OUTPUT="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"environment\":\"$ENVIRONMENT\",\"timeRange\":{\"start\":$((START_TIMESTAMP * 1000)),\"end\":$((END_TIMESTAMP * 1000))},\"metrics\":{}}"
@@ -115,7 +118,7 @@ echo_info ""
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, totalE2eMs, workerDurationMs, queueWaitMs, syncResponseMs, asyncResponseMs
@@ -146,16 +149,31 @@ echo ""
 # 1. Router Lambda Performance
 echo "1. API Gateway → Router Lambda"
 echo "----------------------------------------"
+echo "Note: Counting START events to capture all invocations (including failed)"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @requestId
+| filter @type = "START"
+| stats count() as total_invocations
+' > /tmp/router-start-query.json
+
+ROUTER_START_QUERY_ID=$(cat /tmp/router-start-query.json | jq -r '.queryId')
+
+# Also get REPORT metrics for performance data
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 | filter @type = "REPORT"
 | stats
-    count() as invocations,
+    count() as completed_invocations,
     avg(@duration) as avg_duration_ms,
     percentile(@duration, 50) as p50_ms,
     percentile(@duration, 95) as p95_ms,
@@ -167,9 +185,17 @@ fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 
 ROUTER_QUERY_ID=$(cat /tmp/router-query.json | jq -r '.queryId')
 
-# Wait for query to complete
+# Wait for queries to complete
 sleep 5
 
+echo "Total Invocations (START events):"
+aws logs get-query-results \
+  --query-id ${ROUTER_START_QUERY_ID} \
+  --region ${REGION} \
+  --output table
+
+echo ""
+echo "Completed Invocations (REPORT events with performance data):"
 aws logs get-query-results \
   --query-id ${ROUTER_QUERY_ID} \
   --region ${REGION} \
@@ -180,16 +206,31 @@ echo ""
 # 2. Echo Worker Lambda Performance
 echo "2. Echo Worker Lambda"
 echo "----------------------------------------"
+echo "Note: Counting START events to capture all invocations (including failed)"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @requestId
+| filter @type = "START"
+| stats count() as total_invocations
+' > /tmp/worker-start-query.json
+
+WORKER_START_QUERY_ID=$(cat /tmp/worker-start-query.json | jq -r '.queryId')
+
+# Also get REPORT metrics for performance data
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 | filter @type = "REPORT"
 | stats
-    count() as invocations,
+    count() as completed_invocations,
     avg(@duration) as avg_duration_ms,
     percentile(@duration, 50) as p50_ms,
     percentile(@duration, 95) as p95_ms,
@@ -203,6 +244,14 @@ WORKER_QUERY_ID=$(cat /tmp/worker-query.json | jq -r '.queryId')
 
 sleep 5
 
+echo "Total Invocations (START events):"
+aws logs get-query-results \
+  --query-id ${WORKER_START_QUERY_ID} \
+  --region ${REGION} \
+  --output table
+
+echo ""
+echo "Completed Invocations (REPORT events with performance data):"
 aws logs get-query-results \
   --query-id ${WORKER_QUERY_ID} \
   --region ${REGION} \
@@ -217,7 +266,7 @@ echo "Router Errors:"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @message
@@ -235,7 +284,7 @@ echo "Worker Errors:"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @message
@@ -257,7 +306,7 @@ echo "Router Cold Starts:"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @initDuration
@@ -277,7 +326,7 @@ echo "Worker Cold Starts:"
 aws logs start-query \
   --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
   --start-time ${START_TIMESTAMP} \
-  --end-time ${END_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
   --query-string '
 fields @timestamp, @initDuration
