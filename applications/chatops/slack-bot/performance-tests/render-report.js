@@ -254,9 +254,19 @@ const html = `<!doctype html>
       }
       .cards {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 12px;
         margin-bottom: 24px;
+      }
+      @media (max-width: 768px) {
+        .cards {
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+      }
+      @media (max-width: 480px) {
+        .cards {
+          grid-template-columns: 1fr;
+        }
       }
       .card {
         background: var(--card);
@@ -287,8 +297,18 @@ const html = `<!doctype html>
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
         gap: 16px;
+      }
+      @media (max-width: 1200px) {
+        .grid {
+          grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+      }
+      @media (max-width: 768px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
       }
       .panel {
         background: var(--card);
@@ -499,42 +519,123 @@ const html = `<!doctype html>
       </section>
 
       <!-- CloudWatch Metrics Section -->
-      <section class="panel full-width" id="cloudwatchSection" style="display: none;">
-        <h2>CloudWatch & E2E Metrics</h2>
-        <div class="cards">
-          <div class="card">
-            <div class="card-title">Router Lambda (API Gateway → Router)</div>
-            <div class="card-stat" id="routerInvocations">-</div>
-            <div class="card-label">Invocations</div>
-            <div style="margin-top: 12px; font-size: 12px; color: var(--muted);">
-              <div>Avg: <span id="routerAvg">-</span> ms</div>
-              <div>P95: <span id="routerP95">-</span> ms</div>
-              <div>P99: <span id="routerP99">-</span> ms</div>
+      <section id="cloudwatchSection" style="display: none;">
+        <h2 style="margin: 24px 0 12px; font-size: 20px;">End-to-End Performance Metrics</h2>
+
+        <!-- E2E Summary Cards (Highlighted) -->
+        <div class="cards" style="margin-bottom: 16px;">
+          <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E Requests</div>
+            <div class="value" id="e2eInvocations">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>Total processed</div>
             </div>
           </div>
-          <div class="card">
-            <div class="card-title">Worker Lambda (EventBridge → SQS → Worker)</div>
-            <div class="card-stat" id="workerInvocations">-</div>
-            <div class="card-label">Invocations</div>
-            <div style="margin-top: 12px; font-size: 12px; color: var(--muted);">
-              <div>Avg: <span id="workerAvg">-</span> ms</div>
-              <div>P95: <span id="workerP95">-</span> ms</div>
-              <div>P99: <span id="workerP99">-</span> ms</div>
+          <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E Avg Latency</div>
+            <div class="value" id="e2eAvg">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>P50: <span id="e2eP50">-</span></div>
             </div>
           </div>
-          <div class="card">
-            <div class="card-title">End-to-End (API → Worker Completion)</div>
-            <div class="card-stat" id="e2eInvocations">-</div>
-            <div class="card-label">Invocations</div>
-            <div style="margin-top: 12px; font-size: 12px; color: var(--muted);">
-              <div>Avg: <span id="e2eAvg">-</span> ms</div>
-              <div>P95: <span id="e2eP95">-</span> ms</div>
-              <div>P99: <span id="e2eP99">-</span> ms</div>
+          <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E P95 Latency</div>
+            <div class="value" id="e2eP95">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>95th percentile</div>
+            </div>
+          </div>
+          <div class="card" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 2px solid var(--accent-3);">
+            <div class="label" style="color: var(--accent-3); font-weight: 600;">E2E P99 Latency</div>
+            <div class="value" id="e2eP99">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>99th percentile</div>
             </div>
           </div>
         </div>
-        <div style="margin-top: 16px; padding: 12px; background: var(--bg); border-radius: 4px; font-size: 12px;">
-          <div>Errors - Router: <span id="routerErrors">-</span>, Worker: <span id="workerErrors">-</span></div>
+
+        <!-- E2E Breakdown Cards -->
+        <h3 style="margin: 20px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);">E2E Component Breakdown</h3>
+        <div class="cards" style="margin-bottom: 16px;">
+          <div class="card">
+            <div class="label">Queue Wait Time</div>
+            <div class="value" id="queueWaitAvg">-</div>
+            <div class="value small" style="color: var(--muted);">Average</div>
+          </div>
+          <div class="card">
+            <div class="label">Sync Response</div>
+            <div class="value" id="syncResponseAvg">-</div>
+            <div class="value small" style="color: var(--muted);">Average</div>
+          </div>
+          <div class="card">
+            <div class="label">Async Response</div>
+            <div class="value" id="asyncResponseAvg">-</div>
+            <div class="value small" style="color: var(--muted);">Average</div>
+          </div>
+        </div>
+
+        <!-- Service Level Cards -->
+        <h3 style="margin: 20px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);">Service Level Metrics</h3>
+        <div class="cards">
+          <div class="card">
+            <div class="label">Router Invocations</div>
+            <div class="value" id="routerInvocations">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>Avg: <span id="routerAvg">-</span> ms</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="label">Worker Invocations</div>
+            <div class="value" id="workerInvocations">-</div>
+            <div class="value small" style="color: var(--muted); margin-top: 8px;">
+              <div>Avg: <span id="workerAvg">-</span> ms</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="grid" style="margin-top: 16px;">
+          <div class="panel chart-panel full-width">
+            <h2>Service Latency Distribution</h2>
+            <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">
+              Note: Percentiles are calculated independently per service
+            </div>
+            <canvas id="latencyComparisonChart" height="240"></canvas>
+          </div>
+          <div class="panel chart-panel">
+            <h2>Service Latency Comparison (P50/P95/P99)</h2>
+            <canvas id="serviceComparisonChart" height="240"></canvas>
+          </div>
+          <div class="panel chart-panel">
+            <h2>E2E Timeline Breakdown</h2>
+            <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">
+              Average time breakdown per request
+            </div>
+            <canvas id="e2eTimelineChart" height="240"></canvas>
+          </div>
+          <div class="panel chart-panel full-width">
+            <h2>E2E Component Details (ms)</h2>
+            <table class="table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Average (ms)</th>
+                  <th>Percentage</th>
+                </tr>
+              </thead>
+              <tbody id="e2eBreakdownTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>Error Summary</h2>
+          <div style="padding: 8px 0; font-size: 13px;">
+            <div style="display: flex; gap: 24px;">
+              <div>Router Errors: <strong id="routerErrors">-</strong></div>
+              <div>Worker Errors: <strong id="workerErrors">-</strong></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -615,32 +716,320 @@ const html = `<!doctype html>
         if (cw.router) {
           setText("routerInvocations", fmt.format(cw.router.invocations || 0));
           setText("routerAvg", msFmt.format(parseFloat(cw.router.avg_ms) || 0));
-          setText("routerP95", msFmt.format(parseFloat(cw.router.p95_ms) || 0));
-          setText("routerP99", msFmt.format(parseFloat(cw.router.p99_ms) || 0));
         }
 
         // Worker Lambda
         if (cw.worker) {
           setText("workerInvocations", fmt.format(cw.worker.invocations || 0));
           setText("workerAvg", msFmt.format(parseFloat(cw.worker.avg_ms) || 0));
-          setText("workerP95", msFmt.format(parseFloat(cw.worker.p95_ms) || 0));
-          setText("workerP99", msFmt.format(parseFloat(cw.worker.p99_ms) || 0));
         }
 
         // E2E Metrics
         if (cw.e2e && Object.keys(cw.e2e).length > 0) {
-          setText("e2eInvocations", fmt.format(cw.e2e.invocations || 0));
-          setText("e2eAvg", msFmt.format(parseFloat(cw.e2e.avg_ms) || 0));
-          setText("e2eP95", msFmt.format(parseFloat(cw.e2e.p95_ms) || 0));
-          setText("e2eP99", msFmt.format(parseFloat(cw.e2e.p99_ms) || 0));
+          setText("e2eInvocations", fmt.format(cw.e2e.requests || 0));
+          setText("e2eAvg", msFmt.format(parseFloat(cw.e2e.avg_e2e_ms) || 0) + " ms");
+          setText("e2eP50", msFmt.format(parseFloat(cw.e2e.p50_e2e_ms) || 0) + " ms");
+          setText("e2eP95", msFmt.format(parseFloat(cw.e2e.p95_e2e_ms) || 0) + " ms");
+          setText("e2eP99", msFmt.format(parseFloat(cw.e2e.p99_e2e_ms) || 0) + " ms");
+          setText("queueWaitAvg", msFmt.format(parseFloat(cw.e2e.avg_queue_wait_ms) || 0) + " ms");
+          setText("syncResponseAvg", msFmt.format(parseFloat(cw.e2e.avg_sync_response_ms) || 0) + " ms");
+          setText("asyncResponseAvg", msFmt.format(parseFloat(cw.e2e.avg_async_response_ms) || 0) + " ms");
         }
 
         // Errors
         setText("routerErrors", fmt.format(cw.errors?.router || 0));
         setText("workerErrors", fmt.format(cw.errors?.worker || 0));
 
+        // 일관된 색상 팔레트 정의
+        const colors = {
+          router: { border: '#2856f7', bg: 'rgba(40, 86, 247, 0.2)' },
+          worker: { border: '#14b8a6', bg: 'rgba(20, 184, 166, 0.2)' },
+          e2e: { border: '#f97316', bg: 'rgba(249, 115, 22, 0.2)' },
+          queue: { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.2)' },
+          sync: { border: '#06b6d4', bg: 'rgba(6, 182, 212, 0.2)' },
+          async: { border: '#84cc16', bg: 'rgba(132, 204, 22, 0.2)' }
+        };
+
+        // Service Latency Comparison Chart (Bar)
+        const serviceComparisonEl = document.getElementById("serviceComparisonChart");
+        if (serviceComparisonEl && cw.router && cw.worker && cw.e2e) {
+          new Chart(serviceComparisonEl, {
+            type: "bar",
+            data: {
+              labels: ["P50", "P95", "P99"],
+              datasets: [
+                {
+                  label: "Router",
+                  data: [
+                    parseFloat(cw.router.p50_ms) || 0,
+                    parseFloat(cw.router.p95_ms) || 0,
+                    parseFloat(cw.router.p99_ms) || 0
+                  ],
+                  backgroundColor: colors.router.bg,
+                  borderColor: colors.router.border,
+                  borderWidth: 2
+                },
+                {
+                  label: "Worker",
+                  data: [
+                    parseFloat(cw.worker.p50_ms) || 0,
+                    parseFloat(cw.worker.p95_ms) || 0,
+                    parseFloat(cw.worker.p99_ms) || 0
+                  ],
+                  backgroundColor: colors.worker.bg,
+                  borderColor: colors.worker.border,
+                  borderWidth: 2
+                },
+                {
+                  label: "E2E",
+                  data: [
+                    parseFloat(cw.e2e.p50_e2e_ms) || 0,
+                    parseFloat(cw.e2e.p95_e2e_ms) || 0,
+                    parseFloat(cw.e2e.p99_e2e_ms) || 0
+                  ],
+                  backgroundColor: colors.e2e.bg,
+                  borderColor: colors.e2e.border,
+                  borderWidth: 2
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
+              },
+              plugins: {
+                legend: { position: "top" },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false,
+                  callbacks: {
+                    label: function(context) {
+                      return context.dataset.label + ": " + msFmt.format(context.parsed.y) + " ms";
+                    }
+                  }
+                }
+              },
+              scales: {
+                y: {
+                  title: { display: true, text: "Latency (ms)" },
+                  beginAtZero: true
+                }
+              }
+            }
+          });
+        }
+
+        // E2E Timeline Breakdown Chart (Stacked Bar)
+        const e2eTimelineEl = document.getElementById("e2eTimelineChart");
+        const e2eBreakdownTableEl = document.getElementById("e2eBreakdownTable");
+        if (e2eTimelineEl && cw.e2e) {
+          const queueWait = parseFloat(cw.e2e.avg_queue_wait_ms) || 0;
+          const workerTime = parseFloat(cw.e2e.avg_worker_ms) || 0;
+          const syncResp = parseFloat(cw.e2e.avg_sync_response_ms) || 0;
+          const asyncResp = parseFloat(cw.e2e.avg_async_response_ms) || 0;
+          const total = syncResp + queueWait + workerTime + asyncResp;
+
+          // Breakdown 테이블 생성
+          if (e2eBreakdownTableEl) {
+            const components = [
+              { name: "Sync Response", value: syncResp, color: colors.sync.border },
+              { name: "Queue Wait", value: queueWait, color: colors.queue.border },
+              { name: "Worker Processing", value: workerTime, color: colors.worker.border },
+              { name: "Async Response", value: asyncResp, color: colors.async.border }
+            ];
+
+            e2eBreakdownTableEl.innerHTML = components.map(function(comp) {
+              const percentage = total > 0 ? (comp.value / total * 100) : 0;
+              return '<tr>' +
+                '<td><span style="display: inline-block; width: 12px; height: 12px; background: ' + comp.color + '; border-radius: 2px; margin-right: 6px;"></span>' + comp.name + '</td>' +
+                '<td>' + msFmt.format(comp.value) + '</td>' +
+                '<td>' + fmt.format(percentage) + '%</td>' +
+                '</tr>';
+            }).join('');
+          }
+
+          new Chart(e2eTimelineEl, {
+            type: "bar",
+            data: {
+              labels: ["Request Flow"],
+              datasets: [
+                {
+                  label: "Sync Response",
+                  data: [syncResp],
+                  backgroundColor: colors.sync.bg,
+                  borderColor: colors.sync.border,
+                  borderWidth: 2
+                },
+                {
+                  label: "Queue Wait",
+                  data: [queueWait],
+                  backgroundColor: colors.queue.bg,
+                  borderColor: colors.queue.border,
+                  borderWidth: 2
+                },
+                {
+                  label: "Worker Processing",
+                  data: [workerTime],
+                  backgroundColor: colors.worker.bg,
+                  borderColor: colors.worker.border,
+                  borderWidth: 2
+                },
+                {
+                  label: "Async Response",
+                  data: [asyncResp],
+                  backgroundColor: colors.async.bg,
+                  borderColor: colors.async.border,
+                  borderWidth: 2
+                }
+              ]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  position: "top",
+                  labels: {
+                    generateLabels: function(chart) {
+                      const data = chart.data;
+                      return data.datasets.map(function(dataset, i) {
+                        const value = dataset.data[0];
+                        const percentage = total > 0 ? (value / total * 100) : 0;
+                        return {
+                          text: dataset.label + ': ' + msFmt.format(value) + 'ms (' + fmt.format(percentage) + '%)',
+                          fillStyle: dataset.backgroundColor,
+                          strokeStyle: dataset.borderColor,
+                          lineWidth: dataset.borderWidth,
+                          hidden: false,
+                          index: i
+                        };
+                      });
+                    }
+                  }
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const value = context.parsed.x;
+                      const percentage = total > 0 ? (value / total * 100) : 0;
+                      return context.dataset.label + ": " + msFmt.format(value) + " ms (" + fmt.format(percentage) + "%)";
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  stacked: true,
+                  title: { display: true, text: "Time (ms)" }
+                },
+                y: {
+                  stacked: true
+                }
+              }
+            }
+          });
+        }
+
+        // Latency Comparison Chart (Line Chart without Max)
+        const latencyComparisonEl = document.getElementById("latencyComparisonChart");
+        if (latencyComparisonEl && cw.router && cw.worker && cw.e2e) {
+          new Chart(latencyComparisonEl, {
+            type: "line",
+            data: {
+              labels: ["Avg", "P50", "P95", "P99"],
+              datasets: [
+                {
+                  label: "Router",
+                  data: [
+                    parseFloat(cw.router.avg_ms) || 0,
+                    parseFloat(cw.router.p50_ms) || 0,
+                    parseFloat(cw.router.p95_ms) || 0,
+                    parseFloat(cw.router.p99_ms) || 0
+                  ],
+                  borderColor: colors.router.border,
+                  backgroundColor: colors.router.bg,
+                  tension: 0.3,
+                  fill: true,
+                  pointRadius: 5,
+                  pointHoverRadius: 7
+                },
+                {
+                  label: "Worker",
+                  data: [
+                    parseFloat(cw.worker.avg_ms) || 0,
+                    parseFloat(cw.worker.p50_ms) || 0,
+                    parseFloat(cw.worker.p95_ms) || 0,
+                    parseFloat(cw.worker.p99_ms) || 0
+                  ],
+                  borderColor: colors.worker.border,
+                  backgroundColor: colors.worker.bg,
+                  tension: 0.3,
+                  fill: true,
+                  pointRadius: 5,
+                  pointHoverRadius: 7
+                },
+                {
+                  label: "E2E",
+                  data: [
+                    parseFloat(cw.e2e.avg_e2e_ms) || 0,
+                    parseFloat(cw.e2e.p50_e2e_ms) || 0,
+                    parseFloat(cw.e2e.p95_e2e_ms) || 0,
+                    parseFloat(cw.e2e.p99_e2e_ms) || 0
+                  ],
+                  borderColor: colors.e2e.border,
+                  backgroundColor: colors.e2e.bg,
+                  tension: 0.3,
+                  fill: true,
+                  pointRadius: 5,
+                  pointHoverRadius: 7
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
+              },
+              plugins: {
+                legend: { position: "top" },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false,
+                  callbacks: {
+                    label: function(context) {
+                      return context.dataset.label + ": " + msFmt.format(context.parsed.y) + " ms";
+                    }
+                  }
+                }
+              },
+              scales: {
+                y: {
+                  title: { display: true, text: "Latency (ms)" },
+                  beginAtZero: true
+                }
+              }
+            }
+          });
+        }
+
         console.log("✓ CloudWatch metrics rendered");
       }
+
+      // 일관된 색상 팔레트 정의 (전역)
+      const chartColors = {
+        primary: { border: '#2856f7', bg: 'rgba(40, 86, 247, 0.2)' },
+        secondary: { border: '#14b8a6', bg: 'rgba(20, 184, 166, 0.2)' },
+        tertiary: { border: '#f97316', bg: 'rgba(249, 115, 22, 0.2)' },
+        quaternary: { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.2)' },
+        quinary: { border: '#06b6d4', bg: 'rgba(6, 182, 212, 0.2)' },
+        senary: { border: '#84cc16', bg: 'rgba(132, 204, 22, 0.2)' }
+      };
 
       const seriesLabels = data.series.map((point) => {
         const ts = Number(point.ts);
@@ -656,22 +1045,22 @@ const html = `<!doctype html>
             {
               label: "Median",
               data: data.series.map((point) => point.median),
-              borderColor: "#2856f7",
-              backgroundColor: "rgba(40, 86, 247, 0.2)",
+              borderColor: chartColors.primary.border,
+              backgroundColor: chartColors.primary.bg,
               tension: 0.3,
             },
             {
               label: "P95",
               data: data.series.map((point) => point.p95),
-              borderColor: "#14b8a6",
-              backgroundColor: "rgba(20, 184, 166, 0.2)",
+              borderColor: chartColors.secondary.border,
+              backgroundColor: chartColors.secondary.bg,
               tension: 0.3,
             },
             {
               label: "P99",
               data: data.series.map((point) => point.p99),
-              borderColor: "#f97316",
-              backgroundColor: "rgba(249, 115, 22, 0.2)",
+              borderColor: chartColors.tertiary.border,
+              backgroundColor: chartColors.tertiary.bg,
               tension: 0.3,
             },
           ],
@@ -683,7 +1072,7 @@ const html = `<!doctype html>
             legend: { position: "top" },
           },
           scales: {
-            y: { title: { display: true, text: "ms" } },
+            y: { title: { display: true, text: "ms" }, beginAtZero: true },
           },
         },
       });
@@ -707,9 +1096,10 @@ const html = `<!doctype html>
             {
               label: "RPS",
               data: data.series.map((point) => point.rps),
-              borderColor: "#f97316",
-              backgroundColor: "rgba(249, 115, 22, 0.2)",
+              borderColor: chartColors.tertiary.border,
+              backgroundColor: chartColors.tertiary.bg,
               tension: 0.25,
+              fill: true,
             },
           ],
         },
@@ -720,7 +1110,7 @@ const html = `<!doctype html>
             legend: { position: "top" },
           },
           scales: {
-            y: { title: { display: true, text: "req/s" } },
+            y: { title: { display: true, text: "req/s" }, beginAtZero: true },
           },
         },
       });
@@ -736,9 +1126,9 @@ const html = `<!doctype html>
             {
               label: "Latency",
               data: percentileValues,
-              backgroundColor: "rgba(40, 86, 247, 0.5)",
-              borderColor: "#2856f7",
-              borderWidth: 1,
+              backgroundColor: chartColors.primary.bg,
+              borderColor: chartColors.primary.border,
+              borderWidth: 2,
             },
           ],
         },
@@ -749,7 +1139,7 @@ const html = `<!doctype html>
             legend: { display: false },
           },
           scales: {
-            y: { title: { display: true, text: "ms" } },
+            y: { title: { display: true, text: "ms" }, beginAtZero: true },
           },
         },
       });
@@ -766,9 +1156,9 @@ const html = `<!doctype html>
               {
                 label: "Count",
                 data: data.codes.map((item) => item.count),
-                backgroundColor: "rgba(59, 130, 246, 0.5)",
-                borderColor: "#3b82f6",
-                borderWidth: 1,
+                backgroundColor: chartColors.secondary.bg,
+                borderColor: chartColors.secondary.border,
+                borderWidth: 2,
               },
             ],
           },
@@ -779,7 +1169,7 @@ const html = `<!doctype html>
               legend: { display: false },
             },
             scales: {
-              y: { title: { display: true, text: "Count" } },
+              y: { title: { display: true, text: "Count" }, beginAtZero: true },
             },
           },
         });
@@ -799,9 +1189,9 @@ const html = `<!doctype html>
               {
                 label: "Count",
                 data: data.errors.map((item) => item.count),
-                backgroundColor: "rgba(239, 68, 68, 0.45)",
-                borderColor: "#ef4444",
-                borderWidth: 1,
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                borderColor: '#ef4444',
+                borderWidth: 2,
               },
             ],
           },
@@ -813,7 +1203,7 @@ const html = `<!doctype html>
               legend: { display: false },
             },
             scales: {
-              x: { title: { display: true, text: "Count" } },
+              x: { title: { display: true, text: "Count" }, beginAtZero: true },
             },
           },
         });

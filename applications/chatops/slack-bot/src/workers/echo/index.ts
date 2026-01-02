@@ -77,9 +77,6 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
           duration: syncDuration,
         });
 
-        // Simulate some async work
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
         // Send asynchronous response
         const asyncStart = Date.now();
         await sendSlackResponse(message.response_url, {
