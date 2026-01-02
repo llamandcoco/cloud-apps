@@ -1,0 +1,60 @@
+config:
+  target: "{{ $processEnvironment.API_GATEWAY_URL }}"
+
+  # Enable console reporting
+  engines:
+    socketio:
+      maxPoolSize: 50
+
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 2
+      name: "Warm-up (2 req/s)"
+
+    # Gradual ramp-up (API Gateway 제한 고려)
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 20
+      name: "Ramp-up (5 -> 20 req/s)"
+
+    # Sustained load (안전한 범위)
+    - duration: 180
+      arrivalRate: 20
+      name: "Sustained load (20 req/s)"
+
+    # Medium-high load (제한의 80%)
+    - duration: 60
+      arrivalRate: 20
+      rampTo: 40
+      name: "High load (20 -> 40 req/s)"
+
+    # Cool-down
+    - duration: 30
+      arrivalRate: 5
+      name: "Cool-down (5 req/s)"
+
+  processor: "./slack-signature-processor.js"
+
+  plugins:
+    metrics-by-endpoint:
+      stripQueryString: true
+      metricsNamespace: "slack_bot_echo_light"
+
+  # Performance thresholds for echo command
+  ensure:
+    maxErrorRate: 1     # Max 1% error rate
+    p95: 2000           # 95th percentile under 2s
+    p99: 3000           # 99th percentile under 3s
+
+scenarios:
+  # Only echo command - API Gateway 제한 고려
+  - name: "Echo Command Performance Test (Light)"
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: ""  # Body will be generated in beforeRequest hook
+          afterResponse: "captureMetrics"

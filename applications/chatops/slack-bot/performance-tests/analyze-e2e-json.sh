@@ -1,0 +1,144 @@
+#!/bin/bash
+# Extract E2E performance metrics from Artillery test and CloudWatch Logs
+# Output: JSON format for dashboard integration
+
+set -e
+
+ENVIRONMENT="${ENVIRONMENT:-plt}"
+REGION="ca-central-1"
+
+# Find latest Artillery test result (exclude .metrics.json files)
+LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -1)
+
+if [ -z "$LATEST_RESULT" ]; then
+  echo '{"error": "No Artillery test results found"}' >&2
+  exit 1
+fi
+
+echo "Analyzing: $LATEST_RESULT" >&2
+
+# Extract timestamps from Artillery JSON
+read START_MS END_MS < <(
+  node -pe "
+    const data = require('./$LATEST_RESULT');
+    const agg = data.aggregate || data.rawAggregate || {};
+    const start = agg.firstMetricAt || 0;
+    const end = agg.lastMetricAt || 0;
+    \`\${start} \${end}\`
+  "
+)
+
+if [ "$START_MS" = "0" ] || [ "$END_MS" = "0" ]; then
+  echo '{"error": "Could not extract timestamps from Artillery result"}' >&2
+  exit 1
+fi
+
+# Helper function to execute query and wait for results
+query_logs() {
+  local log_group=$1
+  local query_string=$2
+  local metric_name=$3
+  
+  # Convert milliseconds to seconds for AWS Logs API
+  local start_sec=$((START_MS / 1000))
+  local end_sec=$((END_MS / 1000))
+  
+  local query_id=$(aws logs start-query \
+    --log-group-name "$log_group" \
+    --start-time $start_sec \
+    --end-time $end_sec \
+    --region $REGION \
+    --query-string "$query_string" \
+    --query 'queryId' \
+    --output text)
+  
+  # Wait for query to complete
+  sleep 5
+  
+  aws logs get-query-results \
+    --query-id "$query_id" \
+    --region $REGION \
+    --output json | jq -r '.results'
+}
+
+# 1. Router Lambda Performance
+echo "Querying Router Lambda metrics..." >&2
+ROUTER_METRICS=$(query_logs \
+  "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  "fields @duration | filter @type = \"REPORT\" | stats count() as invocations, avg(@duration) as avg_ms, percentile(@duration, 50) as p50_ms, percentile(@duration, 95) as p95_ms, percentile(@duration, 99) as p99_ms, max(@duration) as max_ms" \
+  "router")
+
+# 2. Worker Lambda Performance
+echo "Querying Worker Lambda metrics..." >&2
+WORKER_METRICS=$(query_logs \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "fields @duration | filter @type = \"REPORT\" | stats count() as invocations, avg(@duration) as avg_ms, percentile(@duration, 50) as p50_ms, percentile(@duration, 95) as p95_ms, percentile(@duration, 99) as p99_ms, max(@duration) as max_ms" \
+  "worker")
+
+# 3. End-to-End Latency (if available)
+echo "Querying E2E latency..." >&2
+E2E_METRICS=$(query_logs \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "fields totalE2eMs, queueWaitMs, workerDurationMs | filter totalE2eMs > 0 | stats count() as requests, avg(totalE2eMs) as avg_e2e_ms, percentile(totalE2eMs, 95) as p95_e2e_ms, percentile(totalE2eMs, 99) as p99_e2e_ms, avg(queueWaitMs) as avg_queue_ms" \
+  "e2e" 2>/dev/null || echo "[]")
+
+# 4. Error Analysis
+echo "Querying errors..." >&2
+ROUTER_ERRORS=$(query_logs \
+  "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  "fields @message | filter level = \"error\" or @message like /ERROR/ | stats count() as error_count" \
+  "router_errors" 2>/dev/null || echo "[]")
+
+WORKER_ERRORS=$(query_logs \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "fields @message | filter level = \"error\" or @message like /ERROR/ | stats count() as error_count" \
+  "worker_errors" 2>/dev/null || echo "[]")
+
+# Parse Artillery metrics
+ARTILLERY_SUMMARY=$(node -pe "
+  const data = require('./$LATEST_RESULT');
+  const summary = data.summary || {};
+  JSON.stringify({
+    requests: summary.requests || 0,
+    responses: summary.responses || 0,
+    errors: summary.errors || 0,
+    errorRate: summary.errorRate || 0,
+    avgRps: summary.avgRps || 0,
+    p50: summary.p50 || summary.median || 0,
+    p95: summary.p95 || 0,
+    p99: summary.p99 || 0,
+    durationMs: summary.durationMs || 0
+  });
+")
+
+# Determine output file name (testname.metrics.json)
+TESTNAME=$(basename "$LATEST_RESULT" .json)
+METRICS_FILE="results/${TESTNAME}.metrics.json"
+
+# Build final JSON output
+cat <<EOF > "$METRICS_FILE"
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "environment": "$ENVIRONMENT",
+  "testFile": "$LATEST_RESULT",
+  "timeRange": {
+    "startMs": $START_MS,
+    "endMs": $END_MS,
+    "durationMs": $((END_MS - START_MS))
+  },
+  "artillery": $ARTILLERY_SUMMARY,
+  "cloudwatch": {
+    "router": $(echo "$ROUTER_METRICS" | jq -r 'if type == "array" and length > 0 then .[0] | map({(.field): .value}) | add else {} end'),
+    "worker": $(echo "$WORKER_METRICS" | jq -r 'if type == "array" and length > 0 then .[0] | map({(.field): .value}) | add else {} end'),
+    "e2e": $(echo "$E2E_METRICS" | jq -r 'if type == "array" and length > 0 then .[0] | map({(.field): .value}) | add else {} end'),
+    "errors": {
+      "router": $(echo "$ROUTER_ERRORS" | jq -r 'if type == "array" and length > 0 then (.[0] | map(select(.field == "error_count") | .value) | .[0] // 0) else 0 end'),
+      "worker": $(echo "$WORKER_ERRORS" | jq -r 'if type == "array" and length > 0 then (.[0] | map(select(.field == "error_count") | .value) | .[0] // 0) else 0 end')
+    }
+  }
+}
+EOF
+
+echo "" >&2
+echo "✓ Metrics saved to: $METRICS_FILE" >&2
+echo "Analysis complete!" >&2
