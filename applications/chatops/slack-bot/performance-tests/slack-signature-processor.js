@@ -65,7 +65,8 @@ function generateSlackSignature(requestParams, context, ee, next) {
   const messageId = Math.floor(Math.random() * 100000) + 1;
 
   // Build body with actual values (not templates)
-  const body = `token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U${userId}&user_name=testuser${userName}&command=/echo&text=performance test message ${messageId}&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc`;
+  // Use special response_url for performance tests (will be mocked in Lambda)
+  const body = `token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U${userId}&user_name=testuser${userName}&command=/echo&text=performance test message ${messageId}&response_url=https://hooks.slack.com/test/perf-test-mock&trigger_id=123.456.abc`;
 
   // Replace requestParams.body with our pre-evaluated body
   requestParams.body = body;
