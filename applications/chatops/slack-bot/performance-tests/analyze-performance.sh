@@ -107,30 +107,31 @@ echo_info "========================================"
 echo_info "Environment: ${ENVIRONMENT}"
 echo_info ""
 
-# 0. End-to-End Latency (if correlation ID is present)
-echo_info "0. End-to-End Latency (Router → Worker)"
+# 0. End-to-End Latency & Component Breakdown (from Performance metrics log)
+echo_info "0. End-to-End Latency & Component Breakdown"
 echo_info "----------------------------------------"
-echo_info "Note: Requires correlation ID tracking in logs"
+echo_info "Note: Using structured Performance metrics from echo worker"
 echo_info ""
 aws logs start-query \
-  --log-group-names "/aws/lambda/laco-${ENVIRONMENT}-slack-router" "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP} \
   --region ${REGION} \
   --query-string '
-fields @timestamp, @message, @logStream
-| filter @message like /correlationId/
-| parse @message "*correlationId*:*\"*\"*" as prefix, key, correlationId, suffix
-| stats earliest(@timestamp) as start, latest(@timestamp) as end by correlationId
-| filter isPresent(start) and isPresent(end)
-| fields correlationId, (end - start) as e2e_latency_ms
+fields @timestamp, totalE2eMs, workerDurationMs, queueWaitMs, syncResponseMs, asyncResponseMs
+| filter message = "Performance metrics"
 | stats
     count() as requests,
-    avg(e2e_latency_ms) as avg_e2e_ms,
-    percentile(e2e_latency_ms, 50) as p50_e2e_ms,
-    percentile(e2e_latency_ms, 95) as p95_e2e_ms,
-    percentile(e2e_latency_ms, 99) as p99_e2e_ms
-' > /tmp/e2e-query.json 2>/dev/null || echo "  ⚠ E2E tracking not available (correlation ID not found in logs)"
+    avg(totalE2eMs) as avg_e2e_ms,
+    percentile(totalE2eMs, 50) as p50_e2e_ms,
+    percentile(totalE2eMs, 95) as p95_e2e_ms,
+    percentile(totalE2eMs, 99) as p99_e2e_ms,
+    max(totalE2eMs) as max_e2e_ms,
+    avg(workerDurationMs) as avg_worker_ms,
+    avg(queueWaitMs) as avg_queue_wait_ms,
+    avg(syncResponseMs) as avg_sync_response_ms,
+    avg(asyncResponseMs) as avg_async_response_ms
+' > /tmp/e2e-query.json 2>/dev/null || echo "  ⚠ E2E tracking not available (Performance metrics not found in logs)"
 
 if [ -f /tmp/e2e-query.json ]; then
   E2E_QUERY_ID=$(cat /tmp/e2e-query.json | jq -r '.queryId' 2>/dev/null)
@@ -393,37 +394,37 @@ aws cloudwatch get-metric-statistics \
 
 echo_info ""
 echo_info "========================================"
-echo_info "Component-Level Breakdown (Estimated)"
+echo_info "Component-Level Breakdown"
 echo_info "========================================"
 echo_info ""
-echo_info "Based on available metrics, estimated latency breakdown:"
+echo_info "Latency breakdown from Performance metrics (Section 0):"
 echo_info ""
-echo_info "┌─────────────────────────────────────────────────────┐"
-echo_info "│ Component Flow                    │ Estimated Time  │"
-echo_info "├─────────────────────────────────────────────────────┤"
-echo_info "│ 1. API Gateway → Router Lambda    │ See section 1   │"
-echo_info "│ 2. Router Lambda Processing       │ See section 1   │"
-echo_info "│ 3. EventBridge → SQS → Worker     │ See section 7   │"
-echo_info "│    (Queue Age)                    │ (SQS Age)       │"
-echo_info "│ 4. Worker Lambda Processing       │ See section 2   │"
-echo_info "└─────────────────────────────────────────────────────┘"
+echo_info "┌──────────────────────────────────────────────────────────┐"
+echo_info "│ Component Flow                    │ Metric             │"
+echo_info "├──────────────────────────────────────────────────────────┤"
+echo_info "│ 1. API Gateway → Router Lambda    │ See section 1      │"
+echo_info "│ 2. Router → EventBridge → SQS     │ avg_queue_wait_ms  │"
+echo_info "│ 3. Worker Lambda Processing       │ avg_worker_ms      │"
+echo_info "│    ├─ Sync Response               │ avg_sync_resp_ms   │"
+echo_info "│    └─ Async Response              │ avg_async_resp_ms  │"
+echo_info "│ Total E2E (API Gateway → Done)    │ avg_e2e_ms         │"
+echo_info "└──────────────────────────────────────────────────────────┘"
 echo_info ""
-echo_info "Total E2E Latency (Estimated):"
-echo_info "  = Router Duration + SQS Age + Worker Duration"
-echo_info ""
-echo_info "Note: For more accurate per-component breakdown,"
-echo_info "      consider adding timestamp tracking to Lambda code."
+echo_info "Formula:"
+echo_info "  totalE2eMs = workerDurationMs + queueWaitMs"
+echo_info "  queueWaitMs = Router processing + EventBridge + SQS polling"
 echo_info ""
 echo_info "========================================"
 echo_info "Analysis Complete"
 echo_info "========================================"
 echo_info ""
-echo_info "Summary: Component performance analyzed"
+echo_info "Summary: Component performance analyzed with structured metrics"
 echo_info ""
 echo_info "Key Metrics to Check:"
-echo_info "  1. Router Lambda P95 < 200ms  (API Gateway processing)"
-echo_info "  2. SQS Queue Age < 500ms      (EventBridge + SQS delay)"
-echo_info "  3. Worker Lambda P95 < 1500ms (Command processing)"
-echo_info "  4. No throttles               (Concurrency OK)"
-echo_info "  5. Error rate < 1%            (System stable)"
+echo_info "  1. E2E P95 < 3000ms           (Total user experience)"
+echo_info "  2. Queue Wait avg < 1000ms    (Router + EventBridge + SQS)"
+echo_info "  3. Worker P95 < 2500ms        (Command processing)"
+echo_info "  4. Sync Response < 500ms      (First Slack response)"
+echo_info "  5. No throttles               (Concurrency OK)"
+echo_info "  6. Error rate < 1%            (System stable)"
 echo_info ""
