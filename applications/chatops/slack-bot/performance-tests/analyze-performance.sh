@@ -292,10 +292,15 @@ WORKER_COLD_ID=$(cat /tmp/worker-cold.json | jq -r '.queryId')
 sleep 5
 aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
 
-echo ""
-echo "========================================"
-echo "CloudWatch Metrics (Lambda)"
-echo "========================================"
+echo_info ""
+echo_info "========================================"
+echo_info "CloudWatch Metrics (Lambda)"
+echo_info "========================================"
+
+# Skip CloudWatch Metrics in quiet mode (optional, can fail)
+if [ "$QUIET_MODE" = true ]; then
+  echo_info "(Skipped in quiet mode)"
+else
 
 # 5. Concurrent Executions
 echo_info ""
@@ -391,6 +396,8 @@ aws cloudwatch get-metric-statistics \
   --statistics Average,Maximum \
   --region ${REGION} \
   --output table
+
+fi  # End of quiet mode skip
 
 echo_info ""
 echo_info "========================================"

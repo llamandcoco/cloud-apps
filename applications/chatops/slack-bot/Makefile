@@ -49,16 +49,13 @@ help:
 	@echo "  make deploy-build           - Deploy build worker from local (default)"
 	@echo ""
 	@echo "$(GREEN)Performance Testing:$(NC)"
-	@echo "  make perf-test              - Full test (~12 min, all commands)"
-	@echo "  make perf-test-echo         - Echo-only test (~7 min)"
-	@echo "  make perf-test-quick        - Quick test (2 min)"
-	@echo "  make perf-test-results      - View latest test results (terminal)"
-	@echo "  make perf-test-analyze      - Analyze CloudWatch metrics (last 15 min)"
-	@echo "  make perf-test-analyze-test - Analyze from latest Artillery test"
-	@echo "  make perf-test-analyze-test-quiet - Analyze from latest test (auto mode)"
-	@echo "  make perf-test-json         - Export metrics to JSON (dashboard)"
-	@echo "  make perf-test-summary      - Quick summary of latest test"
-	@echo "  make perf-test-clean        - Clean test results"
+	@echo "  make perf-test              - Run test (default: minimal ~1min)"
+	@echo "    Options: PROFILE=minimal|light|full"
+	@echo "  make perf-analyze           - Analyze latest test results"
+	@echo "  make perf-analyze-quiet     - Analyze (quiet mode, for CI/CD)"
+	@echo "  make perf-summary           - Quick summary"
+	@echo "  make perf-report            - Generate HTML report"
+	@echo "  make perf-clean             - Clean test results"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
 	@echo "  make deploy-<component>-local - Deploy from local dist/ (fast, no upload)"
@@ -241,116 +238,58 @@ clean-all: clean
 # Performance Testing
 # -----------------------------------------------------------------------------
 
-perf-test: perf-test-install
-	@echo "$(BLUE)Running Artillery performance test...$(NC)"
-	@echo "$(YELLOW)Environment: $(ENVIRONMENT)$(NC)"
-	@echo "$(YELLOW)Region: $(REGION)$(NC)"
-	@echo ""
-	@if [ -z "$(API_GATEWAY_URL)" ]; then \
-		echo "$(YELLOW)⚠ API_GATEWAY_URL not set. Getting from Terragrunt...$(NC)"; \
-		export API_GATEWAY_URL=$$(cd $(SANDBOX_ROOT)/slack-api-gateway && terragrunt output -raw api_gateway_url 2>/dev/null || echo ""); \
-		if [ -z "$$API_GATEWAY_URL" ]; then \
-			echo "$(YELLOW)✗ Could not get API Gateway URL from Terragrunt$(NC)"; \
-			echo "$(YELLOW)  Please set manually: make perf-test API_GATEWAY_URL=https://xxx.execute-api.ca-central-1.amazonaws.com$(NC)"; \
-			exit 1; \
-		fi; \
-		echo "$(GREEN)✓ API Gateway URL: $$API_GATEWAY_URL$(NC)"; \
-		export ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
-		cd performance-tests && artillery run artillery-config.yml --output results/test-$$(date +%Y%m%d-%H%M%S).json; \
-	else \
-		export ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
-		cd performance-tests && artillery run artillery-config.yml --output results/test-$$(date +%Y%m%d-%H%M%S).json; \
-	fi
-
-perf-test-echo: perf-test-install
-	@echo "$(BLUE)Running Echo-only performance test (7 minutes, max 40 req/s)...$(NC)"
-	@echo "$(YELLOW)Environment: $(ENVIRONMENT)$(NC)"
-	@echo "$(YELLOW)Region: $(REGION)$(NC)"
-	@echo "$(YELLOW)⚠ Max load: 40 req/s (API Gateway limit: 50 req/s)$(NC)"
-	@echo ""
-	@if [ -z "$(API_GATEWAY_URL)" ]; then \
-		echo "$(YELLOW)⚠ API_GATEWAY_URL not set. Getting from Terragrunt...$(NC)"; \
-		export API_GATEWAY_URL=$$(cd $(SANDBOX_ROOT)/slack-api-gateway && terragrunt output -raw api_gateway_url 2>/dev/null || echo ""); \
-		if [ -z "$$API_GATEWAY_URL" ]; then \
-			echo "$(YELLOW)✗ Could not get API Gateway URL from Terragrunt$(NC)"; \
-			echo "$(YELLOW)  Please set manually: make perf-test-echo API_GATEWAY_URL=https://xxx.execute-api.ca-central-1.amazonaws.com$(NC)"; \
-			exit 1; \
-		fi; \
-		echo "$(GREEN)✓ API Gateway URL: $$API_GATEWAY_URL$(NC)"; \
-		export ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
-		cd performance-tests && artillery run artillery-echo-light.yml --output results/echo-test-$$(date +%Y%m%d-%H%M%S).json; \
-	else \
-		export ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
-		cd performance-tests && artillery run artillery-echo-light.yml --output results/echo-test-$$(date +%Y%m%d-%H%M%S).json; \
-	fi
-
-perf-test-quick: perf-test-install
-	@echo "$(BLUE)Running quick Artillery test (2 minutes)...$(NC)"
-	@export ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
-	if [ -z "$(API_GATEWAY_URL)" ]; then \
-		export API_GATEWAY_URL=$$(cd $(SANDBOX_ROOT)/slack-api-gateway && terragrunt output -raw api_gateway_url 2>/dev/null || echo "https://placeholder.execute-api.ca-central-1.amazonaws.com"); \
-	fi; \
-	cd performance-tests && artillery quick --count 100 --num 10 $$API_GATEWAY_URL/slack
-
-perf-test-results:
-	@echo "$(BLUE)Viewing latest test results...$(NC)"
-	@cd performance-tests && ./view-results.sh
-
-perf-test-report:
-	@echo "$(BLUE)Generating HTML report from latest test...$(NC)"
-	@REPORT_JSON=$${REPORT_JSON:-$$(ls -t performance-tests/results/*-test-*.json 2>/dev/null | grep -v '\.metrics\.json' | head -n1)}; \
-	if [ -z "$$REPORT_JSON" ]; then \
-		echo "$(YELLOW)✗ No test results found$(NC)"; \
-		exit 1; \
-	fi; \
-	REPORT_HTML=$${REPORT_HTML:-$${REPORT_JSON%.json}.html}; \
-	node performance-tests/render-report.js $$REPORT_JSON $$REPORT_HTML; \
-	echo "$(GREEN)✓ Report written: $$REPORT_HTML$(NC)"
-
-perf-test-summary:
-	@echo "$(BLUE)Quick summary of latest test...$(NC)"
-	@LATEST=$$(ls -t performance-tests/results/*-test-*.json 2>/dev/null | head -n1); \
-	if [ -z "$$LATEST" ]; then \
-		echo "$(YELLOW)✗ No test results found$(NC)"; \
-		exit 1; \
-	fi; \
-	echo "$(GREEN)File: $$LATEST$(NC)"; \
-	echo ""; \
-	jq -r '"Requests: " + (.aggregate.counters["http.requests"] | tostring), \
-	        "P50: " + (.aggregate.summaries["http.response_time"].median | tostring) + "ms", \
-	        "P95: " + (.aggregate.summaries["http.response_time"].p95 | tostring) + "ms", \
-	        "P99: " + (.aggregate.summaries["http.response_time"].p99 | tostring) + "ms", \
-	        "Errors: " + ((.aggregate.counters["errors.total"] // 0) | tostring)' \
-	        $$LATEST 2>/dev/null || cat $$LATEST | grep -A 20 "aggregate"
+# Test profile configuration
+PERF_PROFILE ?= minimal
+PERF_CONFIG_minimal = artillery-echo-minimal.yml
+PERF_CONFIG_light = artillery-echo-light.yml
+PERF_CONFIG_full = artillery-config.yml
 
 perf-test-install:
-	@echo "$(BLUE)Checking Artillery installation...$(NC)"
 	@if ! command -v artillery > /dev/null; then \
-		echo "$(YELLOW)Installing Artillery globally...$(NC)"; \
+		echo "$(BLUE)Installing Artillery...$(NC)"; \
 		npm install -g artillery artillery-plugin-metrics-by-endpoint; \
 	fi
-	@echo "$(BLUE)Installing test dependencies...$(NC)"
 	@cd performance-tests && npm install --no-save @aws-sdk/client-ssm 2>/dev/null || true
-	@echo "$(GREEN)✓ Artillery ready$(NC)"
 
-perf-test-clean:
-	@echo "$(BLUE)Cleaning performance test results...$(NC)"
-	rm -rf performance-tests/results/*.json
-	rm -rf performance-tests/results/*.html
-	@echo "$(GREEN)✓ Performance test results cleaned$(NC)"
+perf-test: perf-test-install
+	@echo "$(BLUE)Running performance test [$(PERF_PROFILE)]...$(NC)"
+	@if [ -z "$(API_GATEWAY_URL)" ]; then \
+		API_URL=$$(cd $(SANDBOX_ROOT)/slack-api-gateway && terragrunt output -raw api_gateway_url 2>/dev/null); \
+		if [ -z "$$API_URL" ]; then \
+			echo "$(YELLOW)✗ Could not get API Gateway URL$(NC)"; \
+			echo "$(YELLOW)  Set manually: API_GATEWAY_URL=https://xxx...$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		API_URL=$(API_GATEWAY_URL); \
+	fi; \
+	CONFIG=$(PERF_CONFIG_$(PERF_PROFILE)); \
+	export API_GATEWAY_URL=$$API_URL ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
+	cd performance-tests && artillery run $$CONFIG --output results/test-$$(date +%Y%m%d-%H%M%S).json
 
-perf-test-analyze:
-	@echo "$(BLUE)Analyzing performance test results from CloudWatch...$(NC)"
-	@cd performance-tests && ./analyze-performance.sh 15
-perf-test-analyze-test:
-	@echo "$(BLUE)Analyzing from latest Artillery test result...$(NC)"
+perf-analyze:
+	@echo "$(BLUE)Analyzing latest test results...$(NC)"
 	@cd performance-tests && ./analyze-performance.sh --from-test
 
-perf-test-analyze-test-quiet:
-	@echo "$(BLUE)Analyzing from latest Artillery test result (quiet mode)...$(NC)"
-	@cd performance-tests && ./analyze-performance.sh --from-test --quiet 2>/dev/null
+perf-analyze-quiet:
+	@cd performance-tests && ./analyze-e2e-json.sh 2>&1 | grep -E '(✓|Analyzing|Error)' || true
 
-perf-test-json:
-	@echo "$(BLUE)Exporting E2E metrics to JSON...$(NC)"
-	@cd performance-tests && ./analyze-e2e-json.sh >/dev/null
-	@echo "$(GREEN)✓ Metrics file created in performance-tests/results/$(NC)"
+perf-summary:
+	@LATEST=$$(ls -t performance-tests/results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No results$(NC)"; exit 1; fi; \
+	echo "$(GREEN)$$LATEST$(NC)"; \
+	jq -r '"Requests: " + (.aggregate.counters["http.requests"] | tostring), \
+	       "P50: " + (.aggregate.summaries["http.response_time"].median | tostring) + "ms", \
+	       "P95: " + (.aggregate.summaries["http.response_time"].p95 | tostring) + "ms", \
+	       "Errors: " + ((.aggregate.counters["errors.total"] // 0) | tostring)' $$LATEST
+
+perf-report:
+	@LATEST=$$(ls -t performance-tests/results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No results$(NC)"; exit 1; fi; \
+	REPORT=$${LATEST%.json}.html; \
+	node performance-tests/render-report.js $$LATEST $$REPORT; \
+	echo "$(GREEN)✓ Report: $$REPORT$(NC)"
+
+perf-clean:
+	@rm -rf performance-tests/results/*.json performance-tests/results/*.html
+	@echo "$(GREEN)✓ Cleaned$(NC)"
