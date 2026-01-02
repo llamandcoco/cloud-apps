@@ -18,6 +18,31 @@ const eventBridgeClient = new EventBridgeClient({
   })
 });
 
+/**
+ * Log router performance metrics for monitoring and analysis
+ */
+function logRouterMetrics(params: {
+  statusCode: number;
+  duration: number;
+  correlationId?: string;
+  command?: string;
+  errorType?: string;
+  errorMessage?: string;
+}) {
+  const { statusCode, duration, correlationId, command, errorType, errorMessage } = params;
+  const success = statusCode >= 200 && statusCode < 300;
+
+  logger.info('Router performance metrics', {
+    correlationId,
+    command,
+    statusCode,
+    duration,
+    success,
+    ...(errorType && { errorType }),
+    ...(errorMessage && { errorMessage })
+  });
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const apiGatewayStartTime = Date.now();
 
@@ -52,7 +77,20 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     );
 
     if (!isValid) {
-      logger.warn('Invalid Slack signature');
+      const duration = Date.now() - apiGatewayStartTime;
+      logger.warn('Invalid Slack signature', {
+        timestamp,
+        signaturePreview: signature.substring(0, 20) + '...'
+      });
+
+      logRouterMetrics({
+        statusCode: 401,
+        duration,
+        correlationId: timestamp,
+        errorType: 'AuthenticationError',
+        errorMessage: 'Invalid Slack signature'
+      });
+
       return {
         statusCode: 401,
         body: JSON.stringify({ error: 'Invalid signature' })
@@ -104,6 +142,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       eventBus: appConfig.eventBridgeBusName
     });
 
+    // Log successful router processing metrics
+    const duration = Date.now() - apiGatewayStartTime;
+    logRouterMetrics({
+      statusCode: 200,
+      duration,
+      correlationId,
+      command: slackCommand.command
+    });
+
     // 4. Return immediate acknowledgment to Slack (must respond within 3 seconds)
     return {
       statusCode: 200,
@@ -116,7 +163,17 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       })
     };
   } catch (error) {
-    logger.error('Router Lambda error', error as Error);
+    const duration = Date.now() - apiGatewayStartTime;
+    const err = error as Error;
+
+    logger.error('Router Lambda error', err);
+
+    logRouterMetrics({
+      statusCode: 500,
+      duration,
+      errorType: err.name,
+      errorMessage: err.message
+    });
 
     return {
       statusCode: 500,

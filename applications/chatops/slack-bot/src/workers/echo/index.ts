@@ -6,6 +6,24 @@ import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
 
+/**
+ * Log worker performance metrics for monitoring and analysis
+ */
+function logWorkerMetrics(params: {
+  correlationId?: string;
+  command?: string;
+  totalE2eMs?: number;
+  workerDurationMs: number;
+  queueWaitMs?: number;
+  syncResponseMs?: number;
+  asyncResponseMs?: number;
+  success: boolean;
+  errorType?: string;
+  errorMessage?: string;
+}) {
+  logger.info('Performance metrics', params);
+}
+
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   logger.info('Echo worker invoked', {
     recordCount: event.Records.length,
@@ -100,17 +118,16 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
           : undefined;
 
         // Log structured performance metrics for CloudWatch Insights analysis
-        if (e2eDuration && correlationId) {
-          const queueWaitMs = e2eDuration - totalDuration;
-          logger.info('Performance metrics', {
-            correlationId,
-            totalE2eMs: e2eDuration,
-            workerDurationMs: totalDuration,
-            queueWaitMs: Math.max(0, queueWaitMs),
-            syncResponseMs: syncDuration,
-            asyncResponseMs: asyncDuration
-          });
-        }
+        logWorkerMetrics({
+          correlationId,
+          command: message.command,
+          totalE2eMs: e2eDuration,
+          workerDurationMs: totalDuration,
+          queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
+          syncResponseMs: syncDuration,
+          asyncResponseMs: asyncDuration,
+          success: true
+        });
 
         messageLogger.info('Echo command processed successfully', {
           totalDuration,
@@ -123,10 +140,20 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
       }
     } catch (error) {
       const duration = Date.now() - startTime;
+      const err = error as Error;
 
-      messageLogger.error('Failed to process echo command', error as Error, {
+      messageLogger.error('Failed to process echo command', err, {
         messageId: record.messageId,
         duration,
+      });
+
+      // Log performance metrics even for failures
+      logWorkerMetrics({
+        correlationId,
+        workerDurationMs: duration,
+        success: false,
+        errorType: err.name,
+        errorMessage: err.message
       });
 
       // Add to failed items for retry
