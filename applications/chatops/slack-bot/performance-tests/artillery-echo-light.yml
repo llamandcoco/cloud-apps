@@ -1,6 +1,11 @@
 config:
   target: "{{ $processEnvironment.API_GATEWAY_URL }}"
 
+  # HTTP timeout configuration (increased to handle high load)
+  http:
+    timeout: 30  # 30 seconds timeout (default: 10s)
+    pool: 50     # Connection pool size
+
   # Enable console reporting
   engines:
     socketio:
