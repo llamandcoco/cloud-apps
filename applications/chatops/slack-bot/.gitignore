@@ -30,3 +30,10 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Performance test results
+performance-tests/results/*.json
+performance-tests/results/*.html
+
+# Environment files
+performance-tests/.env

@@ -1,0 +1,88 @@
+config:
+  target: "{{ $processEnvironment.API_GATEWAY_URL }}"
+  phases:
+    # Warm-up phase - ensure Lambdas are warm
+    - duration: 60
+      arrivalRate: 2
+      name: "Warm-up (2 req/s)"
+
+    # Gradual ramp-up to test scaling
+    - duration: 180
+      arrivalRate: 5
+      rampTo: 20
+      name: "Ramp-up (5 -> 20 req/s)"
+
+    # Sustained load - test steady state performance
+    - duration: 300
+      arrivalRate: 20
+      name: "Sustained load (20 req/s)"
+
+    # Approach API Gateway limit
+    - duration: 120
+      arrivalRate: 20
+      rampTo: 45
+      name: "High load (20 -> 45 req/s)"
+
+    # Cool-down
+    - duration: 60
+      arrivalRate: 5
+      name: "Cool-down (5 req/s)"
+
+  processor: "./slack-signature-processor.js"
+
+  plugins:
+    metrics-by-endpoint:
+      stripQueryString: true
+      metricsNamespace: "slack_bot_perf_test"
+
+  # Performance thresholds
+  ensure:
+    maxErrorRate: 1  # Max 1% error rate
+    p95: 3000        # 95th percentile under 3 seconds
+    p99: 5000        # 99th percentile under 5 seconds
+
+scenarios:
+  # Weighted distribution matching realistic usage
+  - name: "Echo Command (Fast)"
+    weight: 40
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/echo&text=performance test {{ $randomNumber(1, 10000) }}&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          afterResponse: "captureMetrics"
+
+  - name: "Status Command (Medium)"
+    weight: 30
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/status&text=&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          afterResponse: "captureMetrics"
+
+  - name: "Deploy Command (Slow)"
+    weight: 20
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/deploy&text=app-v{{ $randomNumber(1, 100) }}.0&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          afterResponse: "captureMetrics"
+
+  - name: "Build Command (Slow)"
+    weight: 10
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/build&text=main&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          afterResponse: "captureMetrics"

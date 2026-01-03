@@ -1,0 +1,49 @@
+config:
+  target: "{{ $processEnvironment.API_GATEWAY_URL }}"
+
+  phases:
+    # Cold start 측정 (1 request)
+    - duration: 5
+      arrivalRate: 1
+      name: "Cold start check"
+
+    # Warm-up (통계적으로 유의미한 샘플: 50개)
+    - duration: 25
+      arrivalRate: 2
+      name: "Warm state baseline (2 req/s)"
+
+    # Peak load test (짧게 부하 확인: 30개)
+    - duration: 10
+      arrivalRate: 3
+      rampTo: 6
+      name: "Peak load spike (3 -> 6 req/s)"
+
+    # Sustained performance (안정 상태 확인: 40개)
+    - duration: 20
+      arrivalRate: 2
+      name: "Sustained performance (2 req/s)"
+
+  processor: "./slack-signature-processor.js"
+
+  plugins:
+    metrics-by-endpoint:
+      stripQueryString: true
+      metricsNamespace: "slack_bot_echo_minimal"
+
+  # Performance thresholds
+  ensure:
+    maxErrorRate: 1     # Max 1% error rate
+    p95: 3000           # 95th percentile under 3s
+    p99: 4000           # 99th percentile under 4s
+
+scenarios:
+  # Minimal echo command test - 모든 메트릭 확인 가능
+  - name: "Echo Command Minimal Test"
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: ""  # Body will be generated in beforeRequest hook
+          afterResponse: "captureMetrics"
