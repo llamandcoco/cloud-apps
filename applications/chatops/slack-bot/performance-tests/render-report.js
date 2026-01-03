@@ -84,11 +84,12 @@ const codes = Object.entries(codesSource)
 
 const errorMap = {};
 Object.entries(counters).forEach(([key, value]) => {
-  const idx = key.lastIndexOf("errors.");
-  if (idx === -1) return;
-  const label = key.slice(idx + "errors.".length);
+  // Only count top-level errors.* to avoid duplicates
+  // Artillery creates both "errors.ETIMEDOUT" and "scenario.endpoint.errors.ETIMEDOUT"
+  if (!key.startsWith("errors.")) return;
+  const label = key.slice("errors.".length);
   if (label === "total") return;
-  errorMap[label] = (errorMap[label] || 0) + toNumber(value);
+  errorMap[label] = toNumber(value);
 });
 
 const errors = Object.entries(errorMap)
@@ -109,6 +110,12 @@ const summary = {
   p95: toNumber(responseSummary.p95),
   p99: toNumber(responseSummary.p99),
   cloudwatch: metricsData ? metricsData.cloudwatch : null,
+  testInfo: metricsData ? {
+    timestamp: metricsData.timestamp,
+    environment: metricsData.environment,
+    testFile: metricsData.testFile,
+    timeRange: metricsData.timeRange
+  } : null,
 };
 
 const vusers = {
@@ -479,11 +486,25 @@ const html = `<!doctype html>
       <h2 style="margin: 0 0 12px; font-size: 20px;" id="section-1">1. Test Configuration</h2>
 
       <section class="panel" style="margin-bottom: 24px;">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px; margin-bottom: 16px;">
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Environment</div>
+            <div style="font-weight: 600;" id="testEnvironment">-</div>
+          </div>
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Test Started</div>
+            <div style="font-weight: 600;" id="testStartTime">-</div>
+          </div>
           <div>
             <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Test Duration</div>
             <div style="font-weight: 600;" id="testDuration"></div>
           </div>
+          <div>
+            <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Test File</div>
+            <div style="font-weight: 600; font-family: 'IBM Plex Mono', monospace; font-size: 12px;" id="testFileName">-</div>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px;">
           <div>
             <div style="color: var(--muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total VUsers</div>
             <div style="font-weight: 600;" id="testVUsers"></div>
@@ -500,6 +521,34 @@ const html = `<!doctype html>
       </section>
 
       <h2 style="margin: 24px 0 12px; font-size: 20px;" id="section-2">2. Summary</h2>
+
+      <!-- Throughput Metrics (Primary) -->
+      <h3 style="margin: 16px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);" id="throughputTitle">Throughput</h3>
+      <section class="cards" id="throughputCards" style="margin-bottom: 24px;">
+        <div class="card" style="border: 2px solid var(--accent-2);">
+          <div class="label">E2E Throughput</div>
+          <div class="value" id="e2eThroughput">-</div>
+          <div class="value small" style="color: var(--muted);">requests/sec</div>
+        </div>
+        <div class="card">
+          <div class="label">Router RPS</div>
+          <div class="value" id="routerRps">-</div>
+          <div class="value small" style="color: var(--muted);">invocations/sec</div>
+        </div>
+        <div class="card">
+          <div class="label">Worker RPS</div>
+          <div class="value" id="workerRps">-</div>
+          <div class="value small" style="color: var(--muted);">invocations/sec</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Processed</div>
+          <div class="value" id="totalProcessed">-</div>
+          <div class="value small" style="color: var(--muted);">E2E requests</div>
+        </div>
+      </section>
+
+      <!-- Request/Response Summary -->
+      <h3 style="margin: 16px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);">Requests & Errors</h3>
       <section class="cards" style="margin-bottom: 24px;">
         <div class="card">
           <div class="label">Total Requests</div>
@@ -730,7 +779,6 @@ const html = `<!doctype html>
           </div>
         </div>
 
-        <!-- Charts Grid -->
         <div class="grid chart-grid" style="margin-top: 16px;">
           <div class="panel chart-panel" style="grid-column: span 2;">
             <h2>Service Latency Distribution</h2>
@@ -847,6 +895,25 @@ const html = `<!doctype html>
       setText("errors", fmt.format(data.summary.errors));
       setText("errorRate", fmt.format(data.summary.errorRate) + "%");
 
+      // Test Info
+      if (data.summary.testInfo) {
+        const testInfo = data.summary.testInfo;
+        setText("testEnvironment", (testInfo.environment || "unknown").toUpperCase());
+
+        if (testInfo.timestamp) {
+          const testDate = new Date(testInfo.timestamp);
+          setText("testStartTime", testDate.toLocaleString());
+        }
+
+        if (testInfo.timeRange && testInfo.timeRange.durationMs) {
+          setText("testDuration", formatDuration(testInfo.timeRange.durationMs));
+        }
+
+        if (testInfo.testFile) {
+          setText("testFileName", testInfo.testFile);
+        }
+      }
+
       // Client-Side Metrics
       setText("clientMedian", msFmt.format(data.summary.median) + " ms");
       setText("clientP95", msFmt.format(data.summary.p95) + " ms");
@@ -930,6 +997,32 @@ const html = `<!doctype html>
         // Errors
         setText("routerErrors", fmt.format(cw.errors?.router || 0));
         setText("workerErrors", fmt.format(cw.errors?.worker || 0));
+
+        // Throughput Metrics
+        if (data.summary.testInfo && data.summary.testInfo.timeRange) {
+          const throughputTitle = document.getElementById("throughputTitle");
+          const throughputCards = document.getElementById("throughputCards");
+          if (throughputTitle) throughputTitle.style.display = "block";
+          if (throughputCards) throughputCards.style.display = "grid";
+
+          const durationSec = data.summary.testInfo.timeRange.durationMs / 1000;
+
+          if (cw.e2e && cw.e2e.requests) {
+            const e2eThroughput = parseFloat(cw.e2e.requests) / durationSec;
+            setText("e2eThroughput", fmt.format(e2eThroughput));
+            setText("totalProcessed", fmt.format(cw.e2e.requests));
+          }
+
+          if (cw.router && cw.router.invocations) {
+            const routerRps = parseFloat(cw.router.invocations) / durationSec;
+            setText("routerRps", fmt.format(routerRps));
+          }
+
+          if (cw.worker && cw.worker.invocations) {
+            const workerRps = parseFloat(cw.worker.invocations) / durationSec;
+            setText("workerRps", fmt.format(workerRps));
+          }
+        }
 
         // 일관된 색상 팔레트 정의
         const colors = {

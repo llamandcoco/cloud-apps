@@ -108,17 +108,20 @@ WORKER_ERRORS=$(query_logs \
 # Parse Artillery metrics
 ARTILLERY_SUMMARY=$(node -pe "
   const data = require('./$LATEST_RESULT');
-  const summary = data.summary || {};
+  const agg = data.aggregate || {};
+  const counters = agg.counters || {};
+  const summaries = agg.summaries || {};
+  const responseTime = summaries['http.response_time'] || {};
   JSON.stringify({
-    requests: summary.requests || 0,
-    responses: summary.responses || 0,
-    errors: summary.errors || 0,
-    errorRate: summary.errorRate || 0,
-    avgRps: summary.avgRps || 0,
-    p50: summary.p50 || summary.median || 0,
-    p95: summary.p95 || 0,
-    p99: summary.p99 || 0,
-    durationMs: summary.durationMs || 0
+    requests: counters['http.requests'] || 0,
+    responses: counters['http.responses'] || 0,
+    errors: counters['errors.ETIMEDOUT'] || counters['vusers.failed'] || 0,
+    errorRate: counters['http.requests'] ? ((counters['vusers.failed'] || 0) / counters['http.requests'] * 100).toFixed(2) : 0,
+    avgRps: (counters['http.requests'] || 0) / ((data.aggregate.lastMetricAt - data.aggregate.firstMetricAt) / 1000) || 0,
+    p50: responseTime.median || 0,
+    p95: responseTime.p95 || 0,
+    p99: responseTime.p99 || 0,
+    durationMs: (data.aggregate.lastMetricAt - data.aggregate.firstMetricAt) || 0
   });
 ")
 

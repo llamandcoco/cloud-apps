@@ -55,6 +55,7 @@ help:
 	@echo "  make perf-analyze-quiet     - Analyze (quiet mode, for CI/CD)"
 	@echo "  make perf-summary           - Quick summary"
 	@echo "  make perf-report            - Generate HTML report"
+	@echo "  make perf-capture           - Capture HTML as screenshot"
 	@echo "  make perf-clean             - Clean test results"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
@@ -290,6 +291,13 @@ perf-report:
 	node performance-tests/render-report.js $$LATEST $$REPORT; \
 	echo "$(GREEN)✓ Report: $$REPORT$(NC)"
 
+perf-capture:
+	@LATEST=$$(ls -t performance-tests/results/*.html 2>/dev/null | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No HTML report found$(NC)"; exit 1; fi; \
+	OUTPUT=$${LATEST%.html}.png; \
+	node performance-tests/capture-report.js $$LATEST $$OUTPUT; \
+	echo "$(GREEN)✓ Screenshot: $$OUTPUT$(NC)"
+
 perf-clean:
-	@rm -rf performance-tests/results/*.json performance-tests/results/*.html
+	@rm -rf performance-tests/results/*.json performance-tests/results/*.html performance-tests/results/*.png
 	@echo "$(GREEN)✓ Cleaned$(NC)"
