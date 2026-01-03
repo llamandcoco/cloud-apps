@@ -65,7 +65,21 @@ wait_for_query_completion() {
   local elapsed=0
   
   while [ $elapsed -lt $QUERY_MAX_WAIT_TIME ]; do
-    local status=$(aws logs get-query-results --query-id "$query_id" --region "$region" --output json 2>/dev/null | jq -r '.status' 2>/dev/null)
+    # Get query results and check for AWS CLI errors
+    local aws_output=$(aws logs get-query-results --query-id "$query_id" --region "$region" --output json 2>&1)
+    local aws_exit_code=$?
+    
+    if [ $aws_exit_code -ne 0 ]; then
+      echo_info "  ⚠ AWS CLI error for query $query_id: $aws_output" >&2
+      return 1
+    fi
+    
+    local status=$(echo "$aws_output" | jq -r '.status' 2>/dev/null)
+    
+    if [ -z "$status" ] || [ "$status" = "null" ]; then
+      echo_info "  ⚠ Unable to parse query status for $query_id" >&2
+      return 1
+    fi
     
     case "$status" in
       "Complete")
@@ -80,8 +94,8 @@ wait_for_query_completion() {
         elapsed=$((elapsed + QUERY_POLL_INTERVAL))
         ;;
       *)
-        # Unknown status or error getting status
-        echo_info "  ⚠ Unable to get query status for $query_id" >&2
+        # Unknown status - log it for debugging
+        echo_info "  ⚠ Unexpected query status for $query_id: '$status'" >&2
         return 1
         ;;
     esac
