@@ -60,9 +60,9 @@ async function getSlackSigningSecret() {
  */
 function generateSlackSignature(requestParams, context, ee, next) {
   // Generate random values first (to replace Artillery templates)
-  const userId = Math.floor(Math.random() * (9999 - 1000 + 1)) + 1000;
-  const userName = Math.floor(Math.random() * 100) + 1;
-  const messageId = Math.floor(Math.random() * 100000) + 1;
+  const userId = crypto.randomInt(1000, 10000);      // 1000–9999 inclusive
+  const userName = crypto.randomInt(1, 101);         // 1–100 inclusive
+  const messageId = crypto.randomInt(1, 100001);     // 1–100000 inclusive
 
   // Build body with actual values (not templates)
   // Use special response_url for performance tests (will be mocked in Lambda)
