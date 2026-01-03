@@ -25,7 +25,7 @@ if (!outputPath) {
     : inputPath + ".html";
 }
 
-// .metrics.json 파일 경로 생성 및 읽기
+// Load .metrics.json file if exists
 let metricsData = null;
 if (inputPath.endsWith(".json") && !inputPath.includes(".metrics.json")) {
   const metricsPath = inputPath.slice(0, -5) + ".metrics.json";
@@ -920,7 +920,7 @@ const html = `<!doctype html>
       setText("clientP99", msFmt.format(data.summary.p99) + " ms");
       setText("clientMax", msFmt.format(data.summary.max) + " ms");
 
-      // CloudWatch Metrics 표시
+      // Display CloudWatch Metrics
       if (data.summary.cloudwatch && Object.keys(data.summary.cloudwatch).length > 0) {
         const cwSection = document.getElementById("cloudwatchSection");
         if (cwSection) cwSection.style.display = "block";
@@ -934,17 +934,17 @@ const html = `<!doctype html>
           setText("routerInvocations", fmt.format(routerInvocations));
           setText("routerAvg", msFmt.format(parseFloat(cw.router.avg_ms) || 0));
           
-          // 성공/경고 표시
+          // Display success/warning indicator
           if (totalRequests > 0) {
             const successEl = document.getElementById("routerSuccess");
             const warningEl = document.getElementById("routerWarning");
             const warningText = document.getElementById("routerWarningText");
-            
+
             if (routerInvocations === totalRequests) {
-              // 일치: 성공 메시지 표시
+              // Match: display success message
               if (successEl) successEl.style.display = "block";
             } else if (routerInvocations < totalRequests) {
-              // 불일치: 경고 표시
+              // Mismatch: display warning
               const diff = totalRequests - routerInvocations;
               const lossRate = ((diff / totalRequests) * 100).toFixed(1);
               if (warningEl && warningText) {
@@ -961,17 +961,17 @@ const html = `<!doctype html>
           setText("workerInvocations", fmt.format(workerInvocations));
           setText("workerAvg", msFmt.format(parseFloat(cw.worker.avg_ms) || 0));
           
-          // 성공/경고 표시
+          // Display success/warning indicator
           if (totalRequests > 0) {
             const successEl = document.getElementById("workerSuccess");
             const warningEl = document.getElementById("workerWarning");
             const warningText = document.getElementById("workerWarningText");
-            
+
             if (workerInvocations === totalRequests) {
-              // 일치: 성공 메시지 표시
+              // Match: display success message
               if (successEl) successEl.style.display = "block";
             } else if (workerInvocations < totalRequests) {
-              // 불일치: 경고 표시
+              // Mismatch: display warning
               const diff = totalRequests - workerInvocations;
               const lossRate = ((diff / totalRequests) * 100).toFixed(1);
               if (warningEl && warningText) {
@@ -1024,7 +1024,7 @@ const html = `<!doctype html>
           }
         }
 
-        // 일관된 색상 팔레트 정의
+        // Consistent color palette definition
         const colors = {
           router: { border: '#2856f7', bg: 'rgba(40, 86, 247, 0.2)' },
           worker: { border: '#14b8a6', bg: 'rgba(20, 184, 166, 0.2)' },
@@ -1116,7 +1116,7 @@ const html = `<!doctype html>
           const asyncResp = parseFloat(cw.e2e.avg_async_response_ms) || 0;
           const total = syncResp + queueWait + workerTime + asyncResp;
 
-          // Breakdown 테이블 생성
+          // Generate breakdown table
           if (e2eBreakdownTableEl) {
             const components = [
               { name: "Sync Response", value: syncResp, color: colors.sync.border },
@@ -1305,7 +1305,7 @@ const html = `<!doctype html>
         console.log("✓ CloudWatch metrics rendered");
       }
 
-      // 일관된 색상 팔레트 정의 (전역)
+      // Global consistent color palette definition
       const chartColors = {
         primary: { border: '#2856f7', bg: 'rgba(40, 86, 247, 0.2)' },
         secondary: { border: '#14b8a6', bg: 'rgba(20, 184, 166, 0.2)' },
