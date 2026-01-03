@@ -177,6 +177,26 @@ Includes:
 
 ## Advanced Usage
 
+### Configuring CloudWatch Logs Query Wait Time
+
+The `analyze-performance.sh` script uses a polling mechanism to wait for CloudWatch Logs Insights queries to complete. You can configure the behavior using environment variables:
+
+```bash
+# Maximum time to wait for a query to complete (default: 60 seconds)
+export CLOUDWATCH_QUERY_MAX_WAIT=120
+
+# Interval between status checks (default: 2 seconds)
+export CLOUDWATCH_QUERY_POLL_INTERVAL=3
+
+# Run analysis
+./analyze-performance.sh --from-test
+```
+
+These settings are useful when:
+- Querying large log volumes that take longer to process
+- Operating in regions with higher latency
+- Running queries during periods of high CloudWatch API load
+
 ### Custom Test Duration
 
 Edit `artillery-config.yml` phases:
