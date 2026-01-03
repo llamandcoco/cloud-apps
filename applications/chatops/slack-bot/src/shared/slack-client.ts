@@ -13,7 +13,8 @@ export async function sendSlackResponse(
 
     // Skip Slack API call for performance test mock URL
     // Performance tests use special URL to avoid 404 errors
-    if (responseUrl.includes('/test/perf-test-mock')) {
+    // Use startsWith to prevent matching legitimate Slack URLs that might contain this substring
+    if (responseUrl.startsWith('https://hooks.slack.com/test/perf-test-mock')) {
       logger.info('Slack response skipped (performance test mode)', {
         responseType: response.response_type
       });
