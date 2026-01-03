@@ -6,6 +6,10 @@ set -e
 ENVIRONMENT="${ENVIRONMENT:-plt}"
 REGION="ca-central-1"
 
+# Configurable query wait parameters
+QUERY_MAX_WAIT_TIME="${CLOUDWATCH_QUERY_MAX_WAIT:-60}"  # Maximum wait time in seconds
+QUERY_POLL_INTERVAL="${CLOUDWATCH_QUERY_POLL_INTERVAL:-2}"  # Poll interval in seconds
+
 # Check for flags
 OUTPUT_JSON=false
 USE_TEST_RESULT=false
@@ -50,6 +54,41 @@ minutes_ago_timestamp() {
   local minutes=$1
   local now=$(date +%s)
   echo $((now - (minutes * 60)))
+}
+
+# Helper: Poll CloudWatch Logs Insights query until completion
+# Usage: wait_for_query_completion <query_id> <region>
+# Returns: 0 if query completed successfully, 1 if timeout or failed
+wait_for_query_completion() {
+  local query_id=$1
+  local region=$2
+  local elapsed=0
+  
+  while [ $elapsed -lt $QUERY_MAX_WAIT_TIME ]; do
+    local status=$(aws logs get-query-results --query-id "$query_id" --region "$region" --output json 2>/dev/null | jq -r '.status' 2>/dev/null)
+    
+    case "$status" in
+      "Complete")
+        return 0
+        ;;
+      "Failed"|"Cancelled"|"Timeout")
+        echo_info "  ⚠ Query $query_id failed with status: $status" >&2
+        return 1
+        ;;
+      "Running"|"Scheduled")
+        sleep $QUERY_POLL_INTERVAL
+        elapsed=$((elapsed + QUERY_POLL_INTERVAL))
+        ;;
+      *)
+        # Unknown status or error getting status
+        echo_info "  ⚠ Unable to get query status for $query_id" >&2
+        return 1
+        ;;
+    esac
+  done
+  
+  echo_info "  ⚠ Query $query_id timed out after ${QUERY_MAX_WAIT_TIME}s" >&2
+  return 1
 }
 
 
@@ -139,8 +178,9 @@ fields @timestamp, totalE2eMs, workerDurationMs, queueWaitMs, syncResponseMs, as
 if [ -f /tmp/e2e-query.json ]; then
   E2E_QUERY_ID=$(cat /tmp/e2e-query.json | jq -r '.queryId' 2>/dev/null)
   if [ "$E2E_QUERY_ID" != "null" ] && [ -n "$E2E_QUERY_ID" ]; then
-    sleep 8
-    aws logs get-query-results --query-id ${E2E_QUERY_ID} --region ${REGION} --output table 2>/dev/null || echo "  ⚠ Query failed"
+    if wait_for_query_completion "$E2E_QUERY_ID" "$REGION"; then
+      aws logs get-query-results --query-id ${E2E_QUERY_ID} --region ${REGION} --output table 2>/dev/null || echo "  ⚠ Query failed"
+    fi
   fi
 fi
 
@@ -185,21 +225,22 @@ fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 
 ROUTER_QUERY_ID=$(cat /tmp/router-query.json | jq -r '.queryId')
 
-# Wait for queries to complete
-sleep 5
-
 echo "Total Invocations (START events):"
-aws logs get-query-results \
-  --query-id ${ROUTER_START_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$ROUTER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 echo "Completed Invocations (REPORT events with performance data):"
-aws logs get-query-results \
-  --query-id ${ROUTER_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$ROUTER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 
@@ -242,20 +283,22 @@ fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 
 WORKER_QUERY_ID=$(cat /tmp/worker-query.json | jq -r '.queryId')
 
-sleep 5
-
 echo "Total Invocations (START events):"
-aws logs get-query-results \
-  --query-id ${WORKER_START_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$WORKER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 echo "Completed Invocations (REPORT events with performance data):"
-aws logs get-query-results \
-  --query-id ${WORKER_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$WORKER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 
@@ -276,8 +319,9 @@ fields @timestamp, @message
 ' > /tmp/router-errors.json
 
 ROUTER_ERROR_ID=$(cat /tmp/router-errors.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${ROUTER_ERROR_ID} --region ${REGION} --output table
+if wait_for_query_completion "$ROUTER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_ERROR_ID} --region ${REGION} --output table
+fi
 
 echo ""
 echo "Worker Errors:"
@@ -294,8 +338,9 @@ fields @timestamp, @message
 ' > /tmp/worker-errors.json
 
 WORKER_ERROR_ID=$(cat /tmp/worker-errors.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${WORKER_ERROR_ID} --region ${REGION} --output table
+if wait_for_query_completion "$WORKER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_ERROR_ID} --region ${REGION} --output table
+fi
 
 echo ""
 
@@ -318,8 +363,9 @@ fields @timestamp, @initDuration
 ' > /tmp/router-cold.json
 
 ROUTER_COLD_ID=$(cat /tmp/router-cold.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${ROUTER_COLD_ID} --region ${REGION} --output table
+if wait_for_query_completion "$ROUTER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_COLD_ID} --region ${REGION} --output table
+fi
 
 echo ""
 echo "Worker Cold Starts:"
@@ -338,8 +384,9 @@ fields @timestamp, @initDuration
 ' > /tmp/worker-cold.json
 
 WORKER_COLD_ID=$(cat /tmp/worker-cold.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
+if wait_for_query_completion "$WORKER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
+fi
 
 echo_info ""
 echo_info "========================================"
