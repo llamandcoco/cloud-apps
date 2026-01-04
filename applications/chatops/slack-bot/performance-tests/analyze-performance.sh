@@ -1,0 +1,571 @@
+#!/bin/bash
+# Analyze performance test results from CloudWatch Logs
+
+set -e
+
+ENVIRONMENT="${ENVIRONMENT:-plt}"
+REGION="ca-central-1"
+
+# Configurable query wait parameters
+QUERY_MAX_WAIT_TIME="${CLOUDWATCH_QUERY_MAX_WAIT:-60}"  # Maximum wait time in seconds
+QUERY_POLL_INTERVAL="${CLOUDWATCH_QUERY_POLL_INTERVAL:-2}"  # Poll interval in seconds
+
+# Check for flags
+OUTPUT_JSON=false
+USE_TEST_RESULT=false
+QUIET_MODE=false
+
+for arg in "$@"; do
+  case $arg in
+    --from-test)
+      USE_TEST_RESULT=true
+      shift
+      ;;
+    --json)
+      OUTPUT_JSON=true
+      shift
+      ;;
+    --quiet|-q)
+      QUIET_MODE=true
+      shift
+      ;;
+  esac
+done
+
+# Helper: echo only if not quiet
+echo_info() {
+  if [ "$QUIET_MODE" = false ]; then
+    echo "$@"
+  fi
+}
+
+# Helper: macOS/Linux compatible date conversion
+timestamp_to_date() {
+  local ts=$1
+  if [ "$(uname)" = "Darwin" ]; then
+    date -r "$ts" '+%Y-%m-%d %H:%M:%S'
+  else
+    date -d "@$ts" '+%Y-%m-%d %H:%M:%S'
+  fi
+}
+
+# Helper: Calculate time N minutes ago (macOS/Linux compatible)
+minutes_ago_timestamp() {
+  local minutes=$1
+  local now=$(date +%s)
+  echo $((now - (minutes * 60)))
+}
+
+# Helper: Poll CloudWatch Logs Insights query until completion
+# Usage: wait_for_query_completion <query_id> <region>
+# Returns: 0 if query completed successfully, 1 if timeout or failed
+wait_for_query_completion() {
+  local query_id=$1
+  local region=$2
+  local elapsed=0
+  
+  while [ $elapsed -lt $QUERY_MAX_WAIT_TIME ]; do
+    # Get query results and check for AWS CLI errors
+    local aws_output=$(aws logs get-query-results --query-id "$query_id" --region "$region" --output json 2>&1)
+    local aws_exit_code=$?
+    
+    if [ $aws_exit_code -ne 0 ]; then
+      echo_info "  ⚠ AWS CLI error for query $query_id: $aws_output" >&2
+      return 1
+    fi
+    
+    local status=$(echo "$aws_output" | jq -r '.status' 2>/dev/null)
+    
+    if [ -z "$status" ] || [ "$status" = "null" ]; then
+      echo_info "  ⚠ Unable to parse query status for $query_id" >&2
+      return 1
+    fi
+    
+    case "$status" in
+      "Complete")
+        return 0
+        ;;
+      "Failed"|"Cancelled"|"Timeout")
+        echo_info "  ⚠ Query $query_id failed with status: $status" >&2
+        return 1
+        ;;
+      "Running"|"Scheduled")
+        sleep $QUERY_POLL_INTERVAL
+        elapsed=$((elapsed + QUERY_POLL_INTERVAL))
+        ;;
+      *)
+        # Unknown status - log it for debugging
+        echo_info "  ⚠ Unexpected query status for $query_id: '$status'" >&2
+        return 1
+        ;;
+    esac
+  done
+  
+  echo_info "  ⚠ Query $query_id timed out after ${QUERY_MAX_WAIT_TIME}s" >&2
+  return 1
+}
+
+
+# Determine time range
+if [ "$USE_TEST_RESULT" = true ]; then
+  # Use latest Artillery test result (exclude .metrics.json files)
+  LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -1)
+  
+  if [ -z "$LATEST_RESULT" ]; then
+    echo "Error: No Artillery test results found in results/ directory"
+    exit 1
+  fi
+  
+  echo "Using time range from: $LATEST_RESULT"
+  
+  # Extract timestamps from Artillery JSON
+  read START_TIMESTAMP END_TIMESTAMP < <(
+    node -pe "
+      const data = require('./$LATEST_RESULT');
+      const start = data.aggregate.firstMetricAt || data.rawAggregate.firstMetricAt;
+      const end = data.aggregate.lastMetricAt || data.rawAggregate.lastMetricAt;
+      \`\${start} \${end}\`
+    "
+  )
+  
+  if [ -z "$START_TIMESTAMP" ] || [ -z "$END_TIMESTAMP" ]; then
+    echo "Error: Could not extract timestamps from $LATEST_RESULT"
+    exit 1
+  fi
+
+  # Convert milliseconds to seconds for AWS CLI
+  START_TIMESTAMP=$((START_TIMESTAMP / 1000))
+  END_TIMESTAMP=$((END_TIMESTAMP / 1000))
+
+  START_TIME_HUMAN=$(timestamp_to_date $START_TIMESTAMP)
+  END_TIME_HUMAN=$(timestamp_to_date $END_TIMESTAMP)
+
+  echo_info "Test window: $START_TIME_HUMAN ~ $END_TIME_HUMAN"
+  echo_info ""
+else
+  # Use traditional time range (last N minutes)
+  START_TIME="${1:-15}"
+  echo_info "Analyzing last ${START_TIME} minutes of logs..."
+  echo_info ""
+
+  # Calculate timestamps (seconds, for AWS CLI)
+  END_TIMESTAMP=$(date +%s)
+  START_TIMESTAMP=$((END_TIMESTAMP - (START_TIME * 60)))
+fi
+
+# Add 5-minute buffer to end time to account for log ingestion delay
+END_TIMESTAMP_BUFFERED=$((END_TIMESTAMP + 300))
+
+# Calculate optimal period for CloudWatch metrics to avoid exceeding 1440 datapoints limit
+# Formula: period = max(60, ceil(duration / 1440) * 60) rounded up to nearest minute
+TEST_DURATION=$((END_TIMESTAMP - START_TIMESTAMP))
+CLOUDWATCH_PERIOD=60
+if [ $TEST_DURATION -gt 86400 ]; then
+  # For duration > 1 day, use 5-minute periods
+  CLOUDWATCH_PERIOD=300
+elif [ $TEST_DURATION -gt 43200 ]; then
+  # For duration > 12 hours, use 3-minute periods
+  CLOUDWATCH_PERIOD=180
+elif [ $TEST_DURATION -gt 14400 ]; then
+  # For duration > 4 hours, use 2-minute periods
+  CLOUDWATCH_PERIOD=120
+else
+  # For duration <= 4 hours, use 1-minute periods (gives max 240 datapoints for 4 hours)
+  CLOUDWATCH_PERIOD=60
+fi
+
+echo_info "CloudWatch period: ${CLOUDWATCH_PERIOD}s (test duration: ${TEST_DURATION}s)"
+
+# Initialize JSON output structure
+if [ "$OUTPUT_JSON" = true ]; then
+  JSON_OUTPUT="{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"environment\":\"$ENVIRONMENT\",\"timeRange\":{\"start\":$((START_TIMESTAMP * 1000)),\"end\":$((END_TIMESTAMP * 1000))},\"metrics\":{}}"
+fi
+
+echo_info "========================================"
+echo_info "Component Performance Analysis"
+echo_info "========================================"
+echo_info "Environment: ${ENVIRONMENT}"
+echo_info ""
+
+# 0. End-to-End Latency & Component Breakdown (from Performance metrics log)
+echo_info "0. End-to-End Latency & Component Breakdown"
+echo_info "----------------------------------------"
+echo_info "Note: Using structured Performance metrics from echo worker"
+echo_info ""
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, totalE2eMs, workerDurationMs, queueWaitMs, syncResponseMs, asyncResponseMs
+| filter message = "Performance metrics"
+| stats
+    count() as requests,
+    avg(totalE2eMs) as avg_e2e_ms,
+    percentile(totalE2eMs, 50) as p50_e2e_ms,
+    percentile(totalE2eMs, 95) as p95_e2e_ms,
+    percentile(totalE2eMs, 99) as p99_e2e_ms,
+    max(totalE2eMs) as max_e2e_ms,
+    avg(workerDurationMs) as avg_worker_ms,
+    avg(queueWaitMs) as avg_queue_wait_ms,
+    avg(syncResponseMs) as avg_sync_response_ms,
+    avg(asyncResponseMs) as avg_async_response_ms
+' > /tmp/e2e-query.json 2>/dev/null || echo "  ⚠ E2E tracking not available (Performance metrics not found in logs)"
+
+if [ -f /tmp/e2e-query.json ]; then
+  E2E_QUERY_ID=$(cat /tmp/e2e-query.json | jq -r '.queryId' 2>/dev/null)
+  if [ "$E2E_QUERY_ID" != "null" ] && [ -n "$E2E_QUERY_ID" ]; then
+    if wait_for_query_completion "$E2E_QUERY_ID" "$REGION"; then
+      aws logs get-query-results --query-id ${E2E_QUERY_ID} --region ${REGION} --output table 2>/dev/null || echo "  ⚠ Query failed"
+    fi
+  fi
+fi
+
+echo ""
+
+# 1. Router Lambda Performance
+echo "1. API Gateway → Router Lambda"
+echo "----------------------------------------"
+echo "Note: Counting START events to capture all invocations (including failed)"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @requestId
+| filter @type = "START"
+| stats count() as total_invocations
+' > /tmp/router-start-query.json
+
+ROUTER_START_QUERY_ID=$(cat /tmp/router-start-query.json | jq -r '.queryId')
+
+# Also get REPORT metrics for performance data
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
+| filter @type = "REPORT"
+| stats
+    count() as completed_invocations,
+    avg(@duration) as avg_duration_ms,
+    percentile(@duration, 50) as p50_ms,
+    percentile(@duration, 95) as p95_ms,
+    percentile(@duration, 99) as p99_ms,
+    max(@duration) as max_ms,
+    avg(@maxMemoryUsed / 1024 / 1024) as avg_memory_mb,
+    max(@maxMemoryUsed / 1024 / 1024) as max_memory_mb
+' > /tmp/router-query.json
+
+ROUTER_QUERY_ID=$(cat /tmp/router-query.json | jq -r '.queryId')
+
+echo "Total Invocations (START events):"
+if wait_for_query_completion "$ROUTER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
+
+echo ""
+echo "Completed Invocations (REPORT events with performance data):"
+if wait_for_query_completion "$ROUTER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
+
+echo ""
+
+# 2. Echo Worker Lambda Performance
+echo "2. Echo Worker Lambda"
+echo "----------------------------------------"
+echo "Note: Counting START events to capture all invocations (including failed)"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @requestId
+| filter @type = "START"
+| stats count() as total_invocations
+' > /tmp/worker-start-query.json
+
+WORKER_START_QUERY_ID=$(cat /tmp/worker-start-query.json | jq -r '.queryId')
+
+# Also get REPORT metrics for performance data
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
+| filter @type = "REPORT"
+| stats
+    count() as completed_invocations,
+    avg(@duration) as avg_duration_ms,
+    percentile(@duration, 50) as p50_ms,
+    percentile(@duration, 95) as p95_ms,
+    percentile(@duration, 99) as p99_ms,
+    max(@duration) as max_ms,
+    avg(@maxMemoryUsed / 1024 / 1024) as avg_memory_mb,
+    max(@maxMemoryUsed / 1024 / 1024) as max_memory_mb
+' > /tmp/worker-query.json
+
+WORKER_QUERY_ID=$(cat /tmp/worker-query.json | jq -r '.queryId')
+
+echo "Total Invocations (START events):"
+if wait_for_query_completion "$WORKER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
+
+echo ""
+echo "Completed Invocations (REPORT events with performance data):"
+if wait_for_query_completion "$WORKER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
+
+echo ""
+
+# 3. Error Analysis
+echo "3. Error Analysis"
+echo "----------------------------------------"
+echo "Router Errors:"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @message
+| filter @message like /ERROR/ or @message like /Invalid signature/
+| stats count() as error_count by @message
+| limit 20
+' > /tmp/router-errors.json
+
+ROUTER_ERROR_ID=$(cat /tmp/router-errors.json | jq -r '.queryId')
+if wait_for_query_completion "$ROUTER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_ERROR_ID} --region ${REGION} --output table
+fi
+
+echo ""
+echo "Worker Errors:"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @message
+| filter @message like /ERROR/ or level = "error"
+| stats count() as error_count by @message
+| limit 20
+' > /tmp/worker-errors.json
+
+WORKER_ERROR_ID=$(cat /tmp/worker-errors.json | jq -r '.queryId')
+if wait_for_query_completion "$WORKER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_ERROR_ID} --region ${REGION} --output table
+fi
+
+echo ""
+
+# 4. Cold Starts
+echo "4. Cold Start Analysis"
+echo "----------------------------------------"
+echo "Router Cold Starts:"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-slack-router" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @initDuration
+| filter @type = "REPORT" and ispresent(@initDuration)
+| stats
+    count() as cold_starts,
+    avg(@initDuration) as avg_init_ms,
+    max(@initDuration) as max_init_ms
+' > /tmp/router-cold.json
+
+ROUTER_COLD_ID=$(cat /tmp/router-cold.json | jq -r '.queryId')
+if wait_for_query_completion "$ROUTER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_COLD_ID} --region ${REGION} --output table
+fi
+
+echo ""
+echo "Worker Cold Starts:"
+aws logs start-query \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --start-time ${START_TIMESTAMP} \
+  --end-time ${END_TIMESTAMP_BUFFERED} \
+  --region ${REGION} \
+  --query-string '
+fields @timestamp, @initDuration
+| filter @type = "REPORT" and ispresent(@initDuration)
+| stats
+    count() as cold_starts,
+    avg(@initDuration) as avg_init_ms,
+    max(@initDuration) as max_init_ms
+' > /tmp/worker-cold.json
+
+WORKER_COLD_ID=$(cat /tmp/worker-cold.json | jq -r '.queryId')
+if wait_for_query_completion "$WORKER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
+fi
+
+echo_info ""
+echo_info "========================================"
+echo_info "CloudWatch Metrics (Lambda)"
+echo_info "========================================"
+
+# Skip CloudWatch Metrics in quiet mode (optional, can fail)
+if [ "$QUIET_MODE" = true ]; then
+  echo_info "(Skipped in quiet mode)"
+else
+
+# 5. Concurrent Executions
+echo_info ""
+echo_info "5. Concurrent Executions"
+echo_info "----------------------------------------"
+
+echo_info "Router Lambda:"
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name ConcurrentExecutions \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+echo_info ""
+echo_info "Echo Worker Lambda:"
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name ConcurrentExecutions \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+echo_info ""
+echo_info "6. Throttles"
+echo_info "----------------------------------------"
+
+echo_info "Router Throttles:"
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Throttles \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Sum \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+echo_info ""
+echo_info "Worker Throttles:"
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Throttles \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Sum \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+echo_info ""
+echo_info "========================================"
+echo_info "SQS Metrics"
+echo_info "========================================"
+
+# 7. SQS Queue Metrics
+echo_info ""
+echo_info "7. SQS Queue Age"
+echo_info "----------------------------------------"
+
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/SQS \
+  --metric-name ApproximateAgeOfOldestMessage \
+  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+echo_info ""
+echo_info "8. SQS Queue Depth"
+echo_info "----------------------------------------"
+
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/SQS \
+  --metric-name ApproximateNumberOfMessagesVisible \
+  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
+  --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
+  --region ${REGION} \
+  --output table 2>/dev/null || echo "  (No data)"
+
+fi  # End of quiet mode skip
+
+echo_info ""
+echo_info "========================================"
+echo_info "Component-Level Breakdown"
+echo_info "========================================"
+echo_info ""
+echo_info "Latency breakdown from Performance metrics (Section 0):"
+echo_info ""
+echo_info "┌──────────────────────────────────────────────────────────┐"
+echo_info "│ Component Flow                    │ Metric             │"
+echo_info "├──────────────────────────────────────────────────────────┤"
+echo_info "│ 1. API Gateway → Router Lambda    │ See section 1      │"
+echo_info "│ 2. Router → EventBridge → SQS     │ avg_queue_wait_ms  │"
+echo_info "│ 3. Worker Lambda Processing       │ avg_worker_ms      │"
+echo_info "│    ├─ Sync Response               │ avg_sync_resp_ms   │"
+echo_info "│    └─ Async Response              │ avg_async_resp_ms  │"
+echo_info "│ Total E2E (API Gateway → Done)    │ avg_e2e_ms         │"
+echo_info "└──────────────────────────────────────────────────────────┘"
+echo_info ""
+echo_info "Formula:"
+echo_info "  totalE2eMs = workerDurationMs + queueWaitMs"
+echo_info "  queueWaitMs = Router processing + EventBridge + SQS polling"
+echo_info ""
+echo_info "========================================"
+echo_info "Analysis Complete"
+echo_info "========================================"
+echo_info ""
+echo_info "Summary: Component performance analyzed with structured metrics"
+echo_info ""
+echo_info "Key Metrics to Check:"
+echo_info "  1. E2E P95 < 3000ms           (Total user experience)"
+echo_info "  2. Queue Wait avg < 1000ms    (Router + EventBridge + SQS)"
+echo_info "  3. Worker P95 < 2500ms        (Command processing)"
+echo_info "  4. Sync Response < 500ms      (First Slack response)"
+echo_info "  5. No throttles               (Concurrency OK)"
+echo_info "  6. Error rate < 1%            (System stable)"
+echo_info ""

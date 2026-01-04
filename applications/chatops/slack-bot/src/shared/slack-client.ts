@@ -11,6 +11,16 @@ export async function sendSlackResponse(
   try {
     logger.debug('Sending Slack response', { responseUrl, response });
 
+    // Skip Slack API call for performance test mock URL
+    // Performance tests use special URL to avoid 404 errors
+    // Use startsWith to prevent matching legitimate Slack URLs that might contain this substring
+    if (responseUrl.startsWith('https://hooks.slack.com/test/perf-test-mock')) {
+      logger.info('Slack response skipped (performance test mode)', {
+        responseType: response.response_type
+      });
+      return;
+    }
+
     await axios.post(responseUrl, response, {
       headers: {
         'Content-Type': 'application/json'

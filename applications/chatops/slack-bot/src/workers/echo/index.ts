@@ -6,6 +6,24 @@ import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
 
+/**
+ * Log worker performance metrics for monitoring and analysis
+ */
+function logWorkerMetrics(params: {
+  correlationId?: string;
+  command?: string;
+  totalE2eMs?: number;
+  workerDurationMs: number;
+  queueWaitMs?: number;
+  syncResponseMs?: number;
+  asyncResponseMs?: number;
+  success: boolean;
+  errorType?: string;
+  errorMessage?: string;
+}) {
+  logger.info('Performance metrics', params);
+}
+
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   logger.info('Echo worker invoked', {
     recordCount: event.Records.length,
@@ -59,9 +77,6 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
           duration: syncDuration,
         });
 
-        // Simulate some async work
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
         // Send asynchronous response
         const asyncStart = Date.now();
         await sendSlackResponse(message.response_url, {
@@ -95,9 +110,25 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         subsegment?.close();
 
         const totalDuration = Date.now() - startTime;
+        const e2eDuration = message.api_gateway_start_time
+          ? Date.now() - message.api_gateway_start_time
+          : undefined;
+
+        // Log structured performance metrics for CloudWatch Insights analysis
+        logWorkerMetrics({
+          correlationId,
+          command: message.command,
+          totalE2eMs: e2eDuration,
+          workerDurationMs: totalDuration,
+          queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
+          syncResponseMs: syncDuration,
+          asyncResponseMs: asyncDuration,
+          success: true
+        });
 
         messageLogger.info('Echo command processed successfully', {
           totalDuration,
+          e2eDuration,
         });
       } catch (error) {
         subsegment?.addError(error as Error);
@@ -106,10 +137,20 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
       }
     } catch (error) {
       const duration = Date.now() - startTime;
+      const err = error as Error;
 
-      messageLogger.error('Failed to process echo command', error as Error, {
+      messageLogger.error('Failed to process echo command', err, {
         messageId: record.messageId,
         duration,
+      });
+
+      // Log performance metrics even for failures
+      logWorkerMetrics({
+        correlationId,
+        workerDurationMs: duration,
+        success: false,
+        errorType: err.name,
+        errorMessage: err.message
       });
 
       // Add to failed items for retry

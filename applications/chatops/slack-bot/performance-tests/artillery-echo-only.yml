@@ -1,0 +1,54 @@
+config:
+  target: "{{ $processEnvironment.API_GATEWAY_URL }}"
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 2
+      name: "Warm-up (2 req/s)"
+
+    # Gradual ramp-up
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 30
+      name: "Ramp-up (5 -> 30 req/s)"
+
+    # Sustained load
+    - duration: 180
+      arrivalRate: 30
+      name: "Sustained load (30 req/s)"
+
+    # High load test
+    - duration: 60
+      arrivalRate: 30
+      rampTo: 50
+      name: "High load (30 -> 50 req/s)"
+
+    # Cool-down
+    - duration: 30
+      arrivalRate: 5
+      name: "Cool-down (5 req/s)"
+
+  processor: "./slack-signature-processor.js"
+
+  plugins:
+    metrics-by-endpoint:
+      stripQueryString: true
+      metricsNamespace: "slack_bot_echo_test"
+
+  # Performance thresholds for echo command
+  ensure:
+    maxErrorRate: 1     # Max 1% error rate
+    p95: 2000           # Echo should be faster - 95th percentile under 2s
+    p99: 3000           # 99th percentile under 3s
+
+scenarios:
+  # Only echo command - simplest, fastest processing
+  - name: "Echo Command Performance Test"
+    flow:
+      - post:
+          url: "/"
+          headers:
+            Content-Type: "application/x-www-form-urlencoded"
+          beforeRequest: "generateSlackSignature"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser{{ $randomNumber(1, 100) }}&command=/echo&text=performance test message {{ $randomNumber(1, 100000) }}&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          afterResponse: "captureMetrics"

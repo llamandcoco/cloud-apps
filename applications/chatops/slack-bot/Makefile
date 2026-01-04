@@ -48,6 +48,16 @@ help:
 	@echo "  make deploy-<component>     - Upload to S3 → Deploy"
 	@echo "  make deploy-build           - Deploy build worker from local (default)"
 	@echo ""
+	@echo "$(GREEN)Performance Testing:$(NC)"
+	@echo "  make perf-test              - Run test (default: minimal ~1min)"
+	@echo "    Options: PROFILE=minimal|light|full"
+	@echo "  make perf-analyze           - Analyze latest test results"
+	@echo "  make perf-analyze-quiet     - Analyze (quiet mode, for CI/CD)"
+	@echo "  make perf-summary           - Quick summary"
+	@echo "  make perf-report            - Generate HTML report"
+	@echo "  make perf-capture           - Capture HTML as screenshot"
+	@echo "  make perf-clean             - Clean test results"
+	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
 	@echo "  make deploy-<component>-local - Deploy from local dist/ (fast, no upload)"
 	@echo ""
@@ -224,3 +234,70 @@ clean-all: clean
 	@echo "$(BLUE)Cleaning all dependencies...$(NC)"
 	rm -rf node_modules
 	@echo "$(GREEN)✓ Deep clean complete$(NC)"
+
+# -----------------------------------------------------------------------------
+# Performance Testing
+# -----------------------------------------------------------------------------
+
+# Test profile configuration
+PERF_PROFILE ?= minimal
+PERF_CONFIG_minimal = artillery-echo-minimal.yml
+PERF_CONFIG_light = artillery-echo-light.yml
+PERF_CONFIG_full = artillery-config.yml
+
+perf-test-install:
+	@if ! command -v artillery > /dev/null; then \
+		echo "$(BLUE)Installing Artillery...$(NC)"; \
+		npm install -g artillery artillery-plugin-metrics-by-endpoint; \
+	fi
+	@cd performance-tests && npm install --no-save @aws-sdk/client-ssm 2>/dev/null || true
+
+perf-test: perf-test-install
+	@echo "$(BLUE)Running performance test [$(PERF_PROFILE)]...$(NC)"
+	@if [ -z "$(API_GATEWAY_URL)" ]; then \
+		API_URL=$$(cd $(SANDBOX_ROOT)/slack-api-gateway && terragrunt output -raw api_gateway_url 2>/dev/null); \
+		if [ -z "$$API_URL" ]; then \
+			echo "$(YELLOW)✗ Could not get API Gateway URL$(NC)"; \
+			echo "$(YELLOW)  Set manually: API_GATEWAY_URL=https://xxx...$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		API_URL=$(API_GATEWAY_URL); \
+	fi; \
+	CONFIG=$(PERF_CONFIG_$(PERF_PROFILE)); \
+	export API_GATEWAY_URL=$$API_URL ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(REGION); \
+	cd performance-tests && artillery run $$CONFIG --output results/test-$$(date +%Y%m%d-%H%M%S).json
+
+perf-analyze:
+	@echo "$(BLUE)Analyzing latest test results...$(NC)"
+	@cd performance-tests && ./analyze-performance.sh --from-test
+
+perf-analyze-quiet:
+	@cd performance-tests && ./analyze-e2e-json.sh 2>&1 | grep -E '(✓|Analyzing|Error)' || true
+
+perf-summary:
+	@LATEST=$$(ls -t performance-tests/results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No results$(NC)"; exit 1; fi; \
+	echo "$(GREEN)$$LATEST$(NC)"; \
+	jq -r '"Requests: " + (.aggregate.counters["http.requests"] | tostring), \
+	       "P50: " + (.aggregate.summaries["http.response_time"].median | tostring) + "ms", \
+	       "P95: " + (.aggregate.summaries["http.response_time"].p95 | tostring) + "ms", \
+	       "Errors: " + ((.aggregate.counters["errors.total"] // 0) | tostring)' $$LATEST
+
+perf-report:
+	@LATEST=$$(ls -t performance-tests/results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No results$(NC)"; exit 1; fi; \
+	REPORT=$${LATEST%.json}.html; \
+	node performance-tests/render-report.js $$LATEST $$REPORT; \
+	echo "$(GREEN)✓ Report: $$REPORT$(NC)"
+
+perf-capture:
+	@LATEST=$$(ls -t performance-tests/results/*.html 2>/dev/null | head -n1); \
+	if [ -z "$$LATEST" ]; then echo "$(YELLOW)No HTML report found$(NC)"; exit 1; fi; \
+	OUTPUT=$${LATEST%.html}.png; \
+	node performance-tests/capture-report.js $$LATEST $$OUTPUT; \
+	echo "$(GREEN)✓ Screenshot: $$OUTPUT$(NC)"
+
+perf-clean:
+	@rm -rf performance-tests/results/*.json performance-tests/results/*.html performance-tests/results/*.png
+	@echo "$(GREEN)✓ Cleaned$(NC)"
