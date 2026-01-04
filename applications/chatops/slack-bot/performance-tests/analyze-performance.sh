@@ -108,8 +108,8 @@ wait_for_query_completion() {
 
 # Determine time range
 if [ "$USE_TEST_RESULT" = true ]; then
-  # Use latest Artillery test result
-  LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | head -1)
+  # Use latest Artillery test result (exclude .metrics.json files)
+  LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -1)
   
   if [ -z "$LATEST_RESULT" ]; then
     echo "Error: No Artillery test results found in results/ directory"
@@ -132,10 +132,14 @@ if [ "$USE_TEST_RESULT" = true ]; then
     echo "Error: Could not extract timestamps from $LATEST_RESULT"
     exit 1
   fi
-  
-  START_TIME_HUMAN=$(timestamp_to_date $((START_TIMESTAMP / 1000)))
-  END_TIME_HUMAN=$(timestamp_to_date $((END_TIMESTAMP / 1000)))
-  
+
+  # Convert milliseconds to seconds for AWS CLI
+  START_TIMESTAMP=$((START_TIMESTAMP / 1000))
+  END_TIMESTAMP=$((END_TIMESTAMP / 1000))
+
+  START_TIME_HUMAN=$(timestamp_to_date $START_TIMESTAMP)
+  END_TIME_HUMAN=$(timestamp_to_date $END_TIMESTAMP)
+
   echo_info "Test window: $START_TIME_HUMAN ~ $END_TIME_HUMAN"
   echo_info ""
 else
@@ -143,7 +147,7 @@ else
   START_TIME="${1:-15}"
   echo_info "Analyzing last ${START_TIME} minutes of logs..."
   echo_info ""
-  
+
   # Calculate timestamps (seconds, for AWS CLI)
   END_TIMESTAMP=$(date +%s)
   START_TIMESTAMP=$((END_TIMESTAMP - (START_TIME * 60)))
@@ -151,6 +155,26 @@ fi
 
 # Add 5-minute buffer to end time to account for log ingestion delay
 END_TIMESTAMP_BUFFERED=$((END_TIMESTAMP + 300))
+
+# Calculate optimal period for CloudWatch metrics to avoid exceeding 1440 datapoints limit
+# Formula: period = max(60, ceil(duration / 1440) * 60) rounded up to nearest minute
+TEST_DURATION=$((END_TIMESTAMP - START_TIMESTAMP))
+CLOUDWATCH_PERIOD=60
+if [ $TEST_DURATION -gt 86400 ]; then
+  # For duration > 1 day, use 5-minute periods
+  CLOUDWATCH_PERIOD=300
+elif [ $TEST_DURATION -gt 43200 ]; then
+  # For duration > 12 hours, use 3-minute periods
+  CLOUDWATCH_PERIOD=180
+elif [ $TEST_DURATION -gt 14400 ]; then
+  # For duration > 4 hours, use 2-minute periods
+  CLOUDWATCH_PERIOD=120
+else
+  # For duration <= 4 hours, use 1-minute periods (gives max 240 datapoints for 4 hours)
+  CLOUDWATCH_PERIOD=60
+fi
+
+echo_info "CloudWatch period: ${CLOUDWATCH_PERIOD}s (test duration: ${TEST_DURATION}s)"
 
 # Initialize JSON output structure
 if [ "$OUTPUT_JSON" = true ]; then
@@ -424,10 +448,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Maximum,Average \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "Echo Worker Lambda:"
@@ -437,10 +461,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Maximum,Average \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "6. Throttles"
@@ -453,10 +477,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
+  --period ${CLOUDWATCH_PERIOD} \
   --statistics Sum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "Worker Throttles:"
@@ -466,10 +490,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
+  --period ${CLOUDWATCH_PERIOD} \
   --statistics Sum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "========================================"
@@ -487,10 +511,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "8. SQS Queue Depth"
@@ -502,10 +526,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 fi  # End of quiet mode skip
 
