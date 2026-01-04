@@ -6,6 +6,10 @@ set -e
 ENVIRONMENT="${ENVIRONMENT:-plt}"
 REGION="ca-central-1"
 
+# Configurable query wait parameters
+QUERY_MAX_WAIT_TIME="${CLOUDWATCH_QUERY_MAX_WAIT:-60}"  # Maximum wait time in seconds
+QUERY_POLL_INTERVAL="${CLOUDWATCH_QUERY_POLL_INTERVAL:-2}"  # Poll interval in seconds
+
 # Check for flags
 OUTPUT_JSON=false
 USE_TEST_RESULT=false
@@ -52,11 +56,60 @@ minutes_ago_timestamp() {
   echo $((now - (minutes * 60)))
 }
 
+# Helper: Poll CloudWatch Logs Insights query until completion
+# Usage: wait_for_query_completion <query_id> <region>
+# Returns: 0 if query completed successfully, 1 if timeout or failed
+wait_for_query_completion() {
+  local query_id=$1
+  local region=$2
+  local elapsed=0
+  
+  while [ $elapsed -lt $QUERY_MAX_WAIT_TIME ]; do
+    # Get query results and check for AWS CLI errors
+    local aws_output=$(aws logs get-query-results --query-id "$query_id" --region "$region" --output json 2>&1)
+    local aws_exit_code=$?
+    
+    if [ $aws_exit_code -ne 0 ]; then
+      echo_info "  ⚠ AWS CLI error for query $query_id: $aws_output" >&2
+      return 1
+    fi
+    
+    local status=$(echo "$aws_output" | jq -r '.status' 2>/dev/null)
+    
+    if [ -z "$status" ] || [ "$status" = "null" ]; then
+      echo_info "  ⚠ Unable to parse query status for $query_id" >&2
+      return 1
+    fi
+    
+    case "$status" in
+      "Complete")
+        return 0
+        ;;
+      "Failed"|"Cancelled"|"Timeout")
+        echo_info "  ⚠ Query $query_id failed with status: $status" >&2
+        return 1
+        ;;
+      "Running"|"Scheduled")
+        sleep $QUERY_POLL_INTERVAL
+        elapsed=$((elapsed + QUERY_POLL_INTERVAL))
+        ;;
+      *)
+        # Unknown status - log it for debugging
+        echo_info "  ⚠ Unexpected query status for $query_id: '$status'" >&2
+        return 1
+        ;;
+    esac
+  done
+  
+  echo_info "  ⚠ Query $query_id timed out after ${QUERY_MAX_WAIT_TIME}s" >&2
+  return 1
+}
+
 
 # Determine time range
 if [ "$USE_TEST_RESULT" = true ]; then
-  # Use latest Artillery test result
-  LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | head -1)
+  # Use latest Artillery test result (exclude .metrics.json files)
+  LATEST_RESULT=$(ls -t results/*.json 2>/dev/null | grep -v '\.metrics\.json' | head -1)
   
   if [ -z "$LATEST_RESULT" ]; then
     echo "Error: No Artillery test results found in results/ directory"
@@ -79,10 +132,14 @@ if [ "$USE_TEST_RESULT" = true ]; then
     echo "Error: Could not extract timestamps from $LATEST_RESULT"
     exit 1
   fi
-  
-  START_TIME_HUMAN=$(timestamp_to_date $((START_TIMESTAMP / 1000)))
-  END_TIME_HUMAN=$(timestamp_to_date $((END_TIMESTAMP / 1000)))
-  
+
+  # Convert milliseconds to seconds for AWS CLI
+  START_TIMESTAMP=$((START_TIMESTAMP / 1000))
+  END_TIMESTAMP=$((END_TIMESTAMP / 1000))
+
+  START_TIME_HUMAN=$(timestamp_to_date $START_TIMESTAMP)
+  END_TIME_HUMAN=$(timestamp_to_date $END_TIMESTAMP)
+
   echo_info "Test window: $START_TIME_HUMAN ~ $END_TIME_HUMAN"
   echo_info ""
 else
@@ -90,7 +147,7 @@ else
   START_TIME="${1:-15}"
   echo_info "Analyzing last ${START_TIME} minutes of logs..."
   echo_info ""
-  
+
   # Calculate timestamps (seconds, for AWS CLI)
   END_TIMESTAMP=$(date +%s)
   START_TIMESTAMP=$((END_TIMESTAMP - (START_TIME * 60)))
@@ -98,6 +155,26 @@ fi
 
 # Add 5-minute buffer to end time to account for log ingestion delay
 END_TIMESTAMP_BUFFERED=$((END_TIMESTAMP + 300))
+
+# Calculate optimal period for CloudWatch metrics to avoid exceeding 1440 datapoints limit
+# Formula: period = max(60, ceil(duration / 1440) * 60) rounded up to nearest minute
+TEST_DURATION=$((END_TIMESTAMP - START_TIMESTAMP))
+CLOUDWATCH_PERIOD=60
+if [ $TEST_DURATION -gt 86400 ]; then
+  # For duration > 1 day, use 5-minute periods
+  CLOUDWATCH_PERIOD=300
+elif [ $TEST_DURATION -gt 43200 ]; then
+  # For duration > 12 hours, use 3-minute periods
+  CLOUDWATCH_PERIOD=180
+elif [ $TEST_DURATION -gt 14400 ]; then
+  # For duration > 4 hours, use 2-minute periods
+  CLOUDWATCH_PERIOD=120
+else
+  # For duration <= 4 hours, use 1-minute periods (gives max 240 datapoints for 4 hours)
+  CLOUDWATCH_PERIOD=60
+fi
+
+echo_info "CloudWatch period: ${CLOUDWATCH_PERIOD}s (test duration: ${TEST_DURATION}s)"
 
 # Initialize JSON output structure
 if [ "$OUTPUT_JSON" = true ]; then
@@ -139,8 +216,9 @@ fields @timestamp, totalE2eMs, workerDurationMs, queueWaitMs, syncResponseMs, as
 if [ -f /tmp/e2e-query.json ]; then
   E2E_QUERY_ID=$(cat /tmp/e2e-query.json | jq -r '.queryId' 2>/dev/null)
   if [ "$E2E_QUERY_ID" != "null" ] && [ -n "$E2E_QUERY_ID" ]; then
-    sleep 8
-    aws logs get-query-results --query-id ${E2E_QUERY_ID} --region ${REGION} --output table 2>/dev/null || echo "  ⚠ Query failed"
+    if wait_for_query_completion "$E2E_QUERY_ID" "$REGION"; then
+      aws logs get-query-results --query-id ${E2E_QUERY_ID} --region ${REGION} --output table 2>/dev/null || echo "  ⚠ Query failed"
+    fi
   fi
 fi
 
@@ -185,21 +263,22 @@ fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 
 ROUTER_QUERY_ID=$(cat /tmp/router-query.json | jq -r '.queryId')
 
-# Wait for queries to complete
-sleep 5
-
 echo "Total Invocations (START events):"
-aws logs get-query-results \
-  --query-id ${ROUTER_START_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$ROUTER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 echo "Completed Invocations (REPORT events with performance data):"
-aws logs get-query-results \
-  --query-id ${ROUTER_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$ROUTER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${ROUTER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 
@@ -242,20 +321,22 @@ fields @timestamp, @duration, @billedDuration, @memorySize, @maxMemoryUsed
 
 WORKER_QUERY_ID=$(cat /tmp/worker-query.json | jq -r '.queryId')
 
-sleep 5
-
 echo "Total Invocations (START events):"
-aws logs get-query-results \
-  --query-id ${WORKER_START_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$WORKER_START_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_START_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 echo "Completed Invocations (REPORT events with performance data):"
-aws logs get-query-results \
-  --query-id ${WORKER_QUERY_ID} \
-  --region ${REGION} \
-  --output table
+if wait_for_query_completion "$WORKER_QUERY_ID" "$REGION"; then
+  aws logs get-query-results \
+    --query-id ${WORKER_QUERY_ID} \
+    --region ${REGION} \
+    --output table
+fi
 
 echo ""
 
@@ -276,8 +357,9 @@ fields @timestamp, @message
 ' > /tmp/router-errors.json
 
 ROUTER_ERROR_ID=$(cat /tmp/router-errors.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${ROUTER_ERROR_ID} --region ${REGION} --output table
+if wait_for_query_completion "$ROUTER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_ERROR_ID} --region ${REGION} --output table
+fi
 
 echo ""
 echo "Worker Errors:"
@@ -294,8 +376,9 @@ fields @timestamp, @message
 ' > /tmp/worker-errors.json
 
 WORKER_ERROR_ID=$(cat /tmp/worker-errors.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${WORKER_ERROR_ID} --region ${REGION} --output table
+if wait_for_query_completion "$WORKER_ERROR_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_ERROR_ID} --region ${REGION} --output table
+fi
 
 echo ""
 
@@ -318,8 +401,9 @@ fields @timestamp, @initDuration
 ' > /tmp/router-cold.json
 
 ROUTER_COLD_ID=$(cat /tmp/router-cold.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${ROUTER_COLD_ID} --region ${REGION} --output table
+if wait_for_query_completion "$ROUTER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${ROUTER_COLD_ID} --region ${REGION} --output table
+fi
 
 echo ""
 echo "Worker Cold Starts:"
@@ -338,8 +422,9 @@ fields @timestamp, @initDuration
 ' > /tmp/worker-cold.json
 
 WORKER_COLD_ID=$(cat /tmp/worker-cold.json | jq -r '.queryId')
-sleep 5
-aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
+if wait_for_query_completion "$WORKER_COLD_ID" "$REGION"; then
+  aws logs get-query-results --query-id ${WORKER_COLD_ID} --region ${REGION} --output table
+fi
 
 echo_info ""
 echo_info "========================================"
@@ -363,10 +448,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Maximum,Average \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "Echo Worker Lambda:"
@@ -376,10 +461,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Maximum,Average \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Maximum Average \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "6. Throttles"
@@ -392,10 +477,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-slack-router \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
+  --period ${CLOUDWATCH_PERIOD} \
   --statistics Sum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "Worker Throttles:"
@@ -405,10 +490,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
+  --period ${CLOUDWATCH_PERIOD} \
   --statistics Sum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "========================================"
@@ -426,10 +511,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 echo_info ""
 echo_info "8. SQS Queue Depth"
@@ -441,10 +526,10 @@ aws cloudwatch get-metric-statistics \
   --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
+  --period ${CLOUDWATCH_PERIOD} \
+  --statistics Average Maximum \
   --region ${REGION} \
-  --output table
+  --output table 2>/dev/null || echo "  (No data)"
 
 fi  # End of quiet mode skip
 
