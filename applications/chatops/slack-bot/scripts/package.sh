@@ -1,8 +1,12 @@
 #!/bin/bash
 # Lambda packaging script - Creates deployment packages for each Lambda function
 # Usage: ./package.sh [worker-name]
-#   worker-name: Optional. If specified, only packages that worker (router, echo, deploy, status)
+#   worker-name: Optional. If specified, only packages that worker (router, deploy, status, sr, lw)
 #   If omitted, packages all workers
+#
+# Quadrant-based workers:
+#   sr  - Short-Read unified worker (handles /echo, /status, etc.)
+#   lw  - Long-Write unified worker (handles /build, /deploy, etc.)
 
 set -e
 
@@ -47,6 +51,15 @@ package_lambda() {
     cp -r "$BUILD_DIR/shared"/* "$temp_dir/shared/"
   fi
 
+  # For quadrant workers (sr, lw), also copy handlers
+  if [[ "$name" == "sr-worker" || "$name" == "lw-worker" ]]; then
+    if [ -d "$BUILD_DIR/workers/handlers" ]; then
+      mkdir -p "$temp_dir/workers/handlers"
+      cp -r "$BUILD_DIR/workers/handlers"/* "$temp_dir/workers/handlers/"
+      echo "   📁 Including handlers for unified worker"
+    fi
+  fi
+
   # Copy package files
   cp "$PROJECT_ROOT/package.json" "$temp_dir/"
   cp "$PROJECT_ROOT/package-lock.json" "$temp_dir/"
@@ -75,8 +88,12 @@ if [ -n "$TARGET_WORKER" ]; then
     router)
       package_lambda "router" "$BUILD_DIR/router"
       ;;
-    echo)
-      package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
+    # Quadrant-based workers (NEW)
+    sr)
+      package_lambda "sr-worker" "$BUILD_DIR/workers/sr"
+      ;;
+    lw)
+      package_lambda "lw-worker" "$BUILD_DIR/workers/lw"
       ;;
     deploy)
       package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
@@ -84,22 +101,24 @@ if [ -n "$TARGET_WORKER" ]; then
     status)
       package_lambda "status-worker" "$BUILD_DIR/workers/status"
       ;;
-    build)
-      package_lambda "build-worker" "$BUILD_DIR/workers/build"
-      ;;
     *)
       echo "❌ Unknown worker: $TARGET_WORKER"
-      echo "Valid options: router, echo, deploy, status, build"
+      echo "Valid options:"
+        echo "  Quadrant-based: sr, lw"
+        echo "  Legacy: router, deploy, status"
       exit 1
       ;;
   esac
 else
-  # Package all workers
+  # Package all workers (quadrant-based + router)
+  echo "📦 Packaging quadrant-based workers..."
   package_lambda "router" "$BUILD_DIR/router"
-  package_lambda "echo-worker" "$BUILD_DIR/workers/echo"
-  package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
-  package_lambda "status-worker" "$BUILD_DIR/workers/status"
-  package_lambda "build-worker" "$BUILD_DIR/workers/build"
+  package_lambda "sr-worker" "$BUILD_DIR/workers/sr"
+  package_lambda "lw-worker" "$BUILD_DIR/workers/lw"
+
+  echo ""
+  echo "ℹ️  Legacy command-based workers not packaged by default."
+  echo "   Use ./package.sh [worker-name] to package specific legacy workers."
 fi
 
 echo ""

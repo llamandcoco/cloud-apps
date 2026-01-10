@@ -16,6 +16,10 @@ Lambda Runtime (process.env)
 Application Code (config.ts)
 ```
 
+### Quadrant cutover
+- `/echo` runs on the unified short-read (SR) worker via Router → EventBridge → SR queue; the legacy echo queue/worker is deprecated.
+- API Gateway remains the same (`/slack` → router Lambda); no routing change is required.
+
 ## Infrastructure Configuration
 
 ### root.hcl
@@ -128,9 +132,9 @@ All AWS resources follow this pattern:
 
 Examples:
 - EventBridge Bus: `laco-plt-chatbot`
-- SQS Queue: `laco-plt-chatbot-echo`
+- SQS Queue: `laco-plt-sr-queue`
 - Lambda: `laco-plt-slack-router`
-- DLQ: `laco-plt-chatbot-echo-dlq`
+- DLQ: `laco-plt-sr-queue-dlq`
 
 ## Multi-Environment Support
 
