@@ -25,8 +25,9 @@ export async function handleEcho(message: WorkerMessage, messageId: string): Pro
     messageId,
   });
 
-  // Create X-Ray subsegment for processing
-  const segment = AWSXRay.getSegment();
+  // Create X-Ray subsegment for processing (skip if no active segment)
+  const xrayNamespace = (AWSXRay as unknown as { getNamespace?: () => { get?: (key: string) => unknown } }).getNamespace?.();
+  const segment = (xrayNamespace?.get?.('segment') as AWSXRay.Segment | undefined) ?? undefined;
   const subsegment = segment?.addNewSubsegment('ProcessEchoCommand');
 
   try {
