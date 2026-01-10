@@ -142,9 +142,10 @@ upload-all: upload-router upload-sr upload-lw
 upload-all-legacy: upload-router upload-deploy upload-status upload-build
 	@echo "$(GREEN)✓ All legacy components uploaded$(NC)"
 
-# ----------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Deploy Lambda
+# -----------------------------------------------------------------------------
 
-# Pattern rule: deploy-<component> (from S3)
 # Quadrant workers deploy from local by default (faster iteration)
 deploy-sr: build-sr
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sr --local
@@ -152,20 +153,23 @@ deploy-sr: build-sr
 deploy-lw: build-lw
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
 
+# Explicit -local targets for quadrant workers
+deploy-sr-local: build-sr
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sr --local
+
+deploy-lw-local: build-lw
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
+
+deploy-router-local: build-router
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh router --local
+
 # Legacy: deploy-build uses local build by default
 deploy-build: build-build
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh build --local
 
 # All other components deploy from S3
 deploy-%: upload-%
-	@-----------------------------------------------------------------------------
-
-# Pattern rule: deploy-<component>-local (from local dist/, fast for testing)
-# Note: We manually handle the dependency to avoid pattern matching issues
-deploy-%-local: FORCE
-	@COMPONENT=$(patsubst deploy-%-local,%,$@); \
-	$(MAKE) build-$$COMPONENT && \
-	VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $$COMPONENT --local
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $*
 
 # Deploy all quadrant workers from local (router, sr, lw only)
 deploy-all-local: deploy-router-local deploy-sr-local deploy-lw-local
