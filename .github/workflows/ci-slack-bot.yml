@@ -105,45 +105,9 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         run: npm run build
 
-      - name: Package Lambda - Router
+      - name: Package Lambda functions
         working-directory: ${{ env.APP_PATH }}
-        run: |
-          mkdir -p dist/router
-          cp -r build/router/* dist/router/
-          cp package.json package-lock.json dist/router/
-          cd dist/router
-          npm ci --production
-          zip -r ../router.zip .
-
-      - name: Package Lambda - Echo Worker
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          mkdir -p dist/workers/echo
-          cp -r build/workers/echo/* dist/workers/echo/
-          cp package.json package-lock.json dist/workers/echo/
-          cd dist/workers/echo
-          npm ci --production
-          zip -r ../../echo-worker.zip .
-
-      - name: Package Lambda - Deploy Worker
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          mkdir -p dist/workers/deploy
-          cp -r build/workers/deploy/* dist/workers/deploy/
-          cp package.json package-lock.json dist/workers/deploy/
-          cd dist/workers/deploy
-          npm ci --production
-          zip -r ../../deploy-worker.zip .
-
-      - name: Package Lambda - Status Worker
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          mkdir -p dist/workers/status
-          cp -r build/workers/status/* dist/workers/status/
-          cp package.json package-lock.json dist/workers/status/
-          cd dist/workers/status
-          npm ci --production
-          zip -r ../../status-worker.zip .
+        run: npm run package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -170,9 +134,8 @@ jobs:
           VERSION_SHORT=$(echo "$VERSION" | cut -c1-7)
 
           ./scripts/upload-lambda.sh router $ENVIRONMENT $VERSION_SHORT
-          ./scripts/upload-lambda.sh echo $ENVIRONMENT $VERSION_SHORT
-          ./scripts/upload-lambda.sh deploy $ENVIRONMENT $VERSION_SHORT
-          ./scripts/upload-lambda.sh status $ENVIRONMENT $VERSION_SHORT
+          ./scripts/upload-lambda.sh sr $ENVIRONMENT $VERSION_SHORT
+          ./scripts/upload-lambda.sh lw $ENVIRONMENT $VERSION_SHORT
 
       - name: Create deployment marker
         if: github.ref == 'refs/heads/main'
