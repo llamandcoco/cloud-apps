@@ -276,7 +276,7 @@ Query during test:
 
 ```sql
 fields @timestamp, correlationId, e2eLatency, component
-| filter component = "echo-worker"
+| filter component = "sr-worker"
 | stats avg(e2eLatency) as avg, percentile(e2eLatency, 95) as p95 by bin(1m)
 ```
 

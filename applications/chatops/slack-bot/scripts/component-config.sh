@@ -2,16 +2,14 @@
 # Component configuration - Single source of truth for all component mappings
 
 # Valid components list
-export VALID_COMPONENTS="router echo deploy status build"
+export VALID_COMPONENTS="router sr lw"
 
 # Get zip filename for component
 get_zip_name() {
   case "$1" in
     router) echo "router" ;;
-    echo) echo "echo-worker" ;;
-    deploy) echo "deploy-worker" ;;
-    status) echo "status-worker" ;;
-    build) echo "build-worker" ;;
+    sr) echo "sr-worker" ;;
+    lw) echo "lw-worker" ;;
     *) return 1 ;;
   esac
 }
@@ -20,10 +18,8 @@ get_zip_name() {
 get_tg_path() {
   case "$1" in
     router) echo "slack-router-lambda" ;;
-    echo) echo "chatbot-echo-worker" ;;
-    deploy) echo "chatbot-deploy-worker" ;;
-    status) echo "chatbot-status-worker" ;;
-    build) echo "chatbot-build-worker" ;;
+    sr) echo "chatbot-command-sr-worker" ;;
+    lw) echo "chatbot-command-lw-worker" ;;
     *) return 1 ;;
   esac
 }

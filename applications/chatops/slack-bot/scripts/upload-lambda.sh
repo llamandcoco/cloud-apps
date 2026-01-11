@@ -5,9 +5,9 @@
 #   ./scripts/upload-lambda.sh <function> [environment] [version]
 #
 # Examples:
-#   ./scripts/upload-lambda.sh echo
-#   ./scripts/upload-lambda.sh echo plt abc123
-#   ./scripts/upload-lambda.sh echo prod v1.0.0
+#   ./scripts/upload-lambda.sh sr
+#   ./scripts/upload-lambda.sh lw plt abc123
+#   ./scripts/upload-lambda.sh router prod v1.0.0
 # -----------------------------------------------------------------------------
 
 set -e
@@ -21,7 +21,7 @@ VERSION=${3:-$(git rev-parse --short HEAD 2>/dev/null || echo "local")}
 if [ -z "$FUNCTION" ]; then
   echo "Error: Function name required"
   echo "Usage: $0 <function> [environment] [version]"
-  echo "Functions: echo, deploy, status, router"
+  echo "Functions: router, sr, lw"
   exit 1
 fi
 

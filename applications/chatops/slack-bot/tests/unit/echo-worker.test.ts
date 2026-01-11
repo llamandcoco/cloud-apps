@@ -1,12 +1,15 @@
-// Unit tests for Echo Worker
+// Unit tests for SR Worker (echo command)
 
 import { SQSEvent } from 'aws-lambda';
-import { handler } from '../../src/workers/echo';
+import { handler } from '../../src/workers/sr';
 import * as slackClient from '../../src/shared/slack-client';
 
 jest.mock('../../src/shared/slack-client');
+jest.mock('aws-xray-sdk-core', () => ({
+  getSegment: jest.fn(() => undefined),
+}));
 
-describe('Echo Worker', () => {
+describe('SR Worker (echo command)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });

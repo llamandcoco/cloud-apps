@@ -82,14 +82,14 @@ ROUTER_METRICS=$(query_logs \
 # - Worker timeouts or initialization failures
 echo "Querying Worker Lambda metrics..." >&2
 WORKER_METRICS=$(query_logs \
-  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   "fields @duration | filter @type = \"REPORT\" | stats count() as invocations, avg(@duration) as avg_ms, percentile(@duration, 50) as p50_ms, percentile(@duration, 95) as p95_ms, percentile(@duration, 99) as p99_ms, max(@duration) as max_ms" \
   "worker")
 
 # 3. End-to-End Latency & Component Breakdown (from Performance metrics)
 echo "Querying E2E latency & component breakdown..." >&2
 E2E_METRICS=$(query_logs \
-  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   "fields totalE2eMs, queueWaitMs, workerDurationMs, syncResponseMs, asyncResponseMs | filter message = \"Performance metrics\" | stats count() as requests, avg(totalE2eMs) as avg_e2e_ms, percentile(totalE2eMs, 50) as p50_e2e_ms, percentile(totalE2eMs, 95) as p95_e2e_ms, percentile(totalE2eMs, 99) as p99_e2e_ms, avg(queueWaitMs) as avg_queue_wait_ms, avg(workerDurationMs) as avg_worker_ms, avg(syncResponseMs) as avg_sync_response_ms, avg(asyncResponseMs) as avg_async_response_ms" \
   "e2e" 2>/dev/null || echo "[]")
 
@@ -101,7 +101,7 @@ ROUTER_ERRORS=$(query_logs \
   "router_errors" 2>/dev/null || echo "[]")
 
 WORKER_ERRORS=$(query_logs \
-  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   "fields @message | filter level = \"error\" or @message like /ERROR/ | stats count() as error_count" \
   "worker_errors" 2>/dev/null || echo "[]")
 

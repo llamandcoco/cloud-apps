@@ -37,16 +37,16 @@ help:
 	@echo ""
 	@echo "$(GREEN)Build:$(NC)"
 	@echo "  make build                  - Build all Lambda functions"
-	@echo "  make build-<component>      - Build specific component"
-	@echo "    Components: router, echo, deploy, status, build"
+	@echo "  make build-<component>      - Build specific component (router, sr, lw)"
 	@echo ""
 	@echo "$(GREEN)Upload to S3:$(NC)"
 	@echo "  make upload-<component>     - Upload component (auto-build)"
-	@echo "  make upload-all             - Upload all components"
+	@echo "  make upload-all             - Upload all components (router, sr, lw)"
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda:$(NC)"
 	@echo "  make deploy-<component>     - Upload to S3 → Deploy"
-	@echo "  make deploy-build           - Deploy build worker from local (default)"
+	@echo "  make deploy-sr              - Deploy SR worker from local (default)"
+	@echo "  make deploy-lw              - Deploy LW worker from local (default)"
 	@echo ""
 	@echo "$(GREEN)Performance Testing:$(NC)"
 	@echo "  make perf-test              - Run test (default: minimal ~1min)"
@@ -60,6 +60,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Deploy Lambda (Advanced):$(NC)"
 	@echo "  make deploy-<component>-local - Deploy from local dist/ (fast, no upload)"
+	@echo "  make deploy-all-local       - Deploy all quadrant workers (router, sr, lw)"
+	@echo "  make deploy-sr-local        - Deploy SR worker from local"
+	@echo "  make deploy-lw-local        - Deploy LW worker from local"
 	@echo ""
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test                   - Run unit tests"
@@ -106,8 +109,10 @@ verify-aws:
 # Build
 # -----------------------------------------------------------------------------
 
-# Valid components (must match scripts/component-config.sh)
-COMPONENTS := router echo deploy status build
+# Valid components
+# Quadrant-based workers (new architecture)
+QUADRANT_WORKERS := sr lw
+VALID_COMPONENTS := router sr lw
 
 build: clean-dist
 	@echo "$(BLUE)Building all Lambda functions...$(NC)"
@@ -131,16 +136,34 @@ upload-%: build-% verify-aws
 	echo "$$UPLOAD_OUTPUT"; \
 	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-$*.tmp || true
 
-upload-all: upload-router upload-echo upload-deploy upload-status upload-build
-	@echo "$(GREEN)✓ All components uploaded$(NC)"
+upload-all: upload-router upload-sr upload-lw
+	@echo "$(GREEN)✓ All quadrant workers uploaded$(NC)"
+
+upload-all-legacy: upload-router upload-deploy upload-status upload-build
+	@echo "$(GREEN)✓ All legacy components uploaded$(NC)"
 
 # -----------------------------------------------------------------------------
 # Deploy Lambda
-# Default: Upload to S3 → Deploy (recommended for production)
 # -----------------------------------------------------------------------------
 
-# Pattern rule: deploy-<component> (from S3)
-# Note: deploy-build uses local build by default
+# Quadrant workers deploy from local by default (faster iteration)
+deploy-sr: build-sr
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sr --local
+
+deploy-lw: build-lw
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
+
+# Explicit -local targets for quadrant workers
+deploy-sr-local: build-sr
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sr --local
+
+deploy-lw-local: build-lw
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
+
+deploy-router-local: build-router
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh router --local
+
+# Legacy: deploy-build uses local build by default
 deploy-build: build-build
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh build --local
 
@@ -148,31 +171,14 @@ deploy-build: build-build
 deploy-%: upload-%
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $*
 
-# -----------------------------------------------------------------------------
-# Deploy Lambda (Advanced)
-# -----------------------------------------------------------------------------
-
-# Pattern rule: deploy-<component>-local (from local dist/, fast for testing)
-# Note: We manually handle the dependency to avoid pattern matching issues
-deploy-%-local: FORCE
-	@COMPONENT=$(patsubst deploy-%-local,%,$@); \
-	$(MAKE) build-$$COMPONENT && \
-	VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $$COMPONENT --local
+# Deploy all quadrant workers from local (router, sr, lw only)
+deploy-all-local: deploy-router-local deploy-sr-local deploy-lw-local
+	@echo "$(GREEN)✓ All quadrant workers deployed from local$(NC)"
 
 # Deploy from S3 with smart version handling
 # Usage:
 #   make deploy-echo-s3                    # Interactive selection
-#   VERSION=abc123 make deploy-echo-s3     # Deploy specific version
-deploy-echo-s3: verify-aws
-	@$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE)) \
-	AWS_REGION=$(REGION) \
-	SANDBOX_ROOT=$(SANDBOX_ROOT) \
-	$(SCRIPTS_DIR)/deploy-from-s3.sh echo $(ENVIRONMENT)
-
-FORCE:
-.PHONY: FORCE
-
-# -----------------------------------------------------------------------------
+#   VERSION=acomponents from local
 # Test
 # -----------------------------------------------------------------------------
 

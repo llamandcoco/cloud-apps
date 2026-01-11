@@ -190,10 +190,10 @@ echo_info ""
 # 0. End-to-End Latency & Component Breakdown (from Performance metrics log)
 echo_info "0. End-to-End Latency & Component Breakdown"
 echo_info "----------------------------------------"
-echo_info "Note: Using structured Performance metrics from echo worker"
+echo_info "Note: Using structured Performance metrics from SR (short-read) worker"
 echo_info ""
 aws logs start-query \
-  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
@@ -287,7 +287,7 @@ echo "2. Echo Worker Lambda"
 echo "----------------------------------------"
 echo "Note: Counting START events to capture all invocations (including failed)"
 aws logs start-query \
-  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
@@ -301,7 +301,7 @@ WORKER_START_QUERY_ID=$(cat /tmp/worker-start-query.json | jq -r '.queryId')
 
 # Also get REPORT metrics for performance data
 aws logs start-query \
-  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
@@ -364,7 +364,7 @@ fi
 echo ""
 echo "Worker Errors:"
 aws logs start-query \
-  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
@@ -408,7 +408,7 @@ fi
 echo ""
 echo "Worker Cold Starts:"
 aws logs start-query \
-  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-echo-worker" \
+  --log-group-name "/aws/lambda/laco-${ENVIRONMENT}-chatbot-command-sr-worker" \
   --start-time ${START_TIMESTAMP} \
   --end-time ${END_TIMESTAMP_BUFFERED} \
   --region ${REGION} \
@@ -458,7 +458,7 @@ echo_info "Echo Worker Lambda:"
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
   --metric-name ConcurrentExecutions \
-  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-command-sr-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period ${CLOUDWATCH_PERIOD} \
@@ -487,7 +487,7 @@ echo_info "Worker Throttles:"
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
   --metric-name Throttles \
-  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-echo-worker \
+  --dimensions Name=FunctionName,Value=laco-${ENVIRONMENT}-chatbot-command-sr-worker \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period ${CLOUDWATCH_PERIOD} \
@@ -508,7 +508,7 @@ echo_info "----------------------------------------"
 aws cloudwatch get-metric-statistics \
   --namespace AWS/SQS \
   --metric-name ApproximateAgeOfOldestMessage \
-  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
+  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-command-sr-queue \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period ${CLOUDWATCH_PERIOD} \
@@ -523,7 +523,7 @@ echo_info "----------------------------------------"
 aws cloudwatch get-metric-statistics \
   --namespace AWS/SQS \
   --metric-name ApproximateNumberOfMessagesVisible \
-  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-echo \
+  --dimensions Name=QueueName,Value=laco-${ENVIRONMENT}-chatbot-command-sr-queue \
   --start-time $(date -u -d @$START_TIMESTAMP +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $START_TIMESTAMP +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
   --period ${CLOUDWATCH_PERIOD} \

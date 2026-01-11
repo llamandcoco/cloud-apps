@@ -5,9 +5,9 @@
 # Builds Lambda functions and uploads artifacts to S3
 #
 # Usage from Slack:
-#   /build router
-#   /build echo
 #   /build all
+#   /build router
+#   /build sr
 # =============================================================================
 
 name: Slack Build Command
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       component:
-        description: 'Component to build (router, echo, deploy, status, all)'
+        description: 'Component to build (all, router, sr, lw)'
         required: true
         default: 'all'
       environment:
@@ -137,7 +137,7 @@ jobs:
 
           # Determine which components to upload
           if [ "$COMPONENT" == "all" ]; then
-            COMPONENTS=("router" "echo" "deploy" "status")
+            COMPONENTS=("router" "sr" "lw")
           else
             COMPONENTS=("$COMPONENT")
           fi

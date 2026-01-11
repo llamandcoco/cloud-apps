@@ -161,17 +161,17 @@ aws --endpoint-url=http://localhost:4566 events put-events \
 
 # Check SQS queue received message
 aws --endpoint-url=http://localhost:4566 sqs receive-message \
-  --queue-url http://localhost:4566/000000000000/laco-local-chatbot-echo
+  --queue-url http://localhost:4566/000000000000/laco-local-sr-queue
 ```
 
 ### 3. Worker Lambdas
 
 **Unit Test:**
 ```typescript
-// tests/unit/workers/echo.test.ts
-import { handler } from '../src/workers/echo';
+// tests/unit/workers/sr.test.ts
+import { handler } from '../src/workers/sr';
 
-test('echo worker responds correctly', async () => {
+test('sr worker responds correctly', async () => {
   const event = {
     Records: [{
       body: JSON.stringify({
@@ -200,8 +200,8 @@ test('full echo flow', async () => {
   await sleep(1000);
   
   // 3. Manually trigger worker
-  const messages = await getSQSMessages('laco-local-chatbot-echo');
-  await echoWorker.handler({ Records: messages });
+  const messages = await getSQSMessages('laco-local-sr-queue');
+  await srWorker.handler({ Records: messages });
   
   // 4. Verify Slack response
   expect(mockSlack.lastResponse).toBe('async test');
