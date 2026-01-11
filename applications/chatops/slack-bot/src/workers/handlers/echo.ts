@@ -6,11 +6,27 @@ import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
 
 /**
+ * Handler result with performance metrics
+ */
+interface HandlerResult {
+  syncResponseMs?: number;
+  asyncResponseMs?: number;
+}
+
+/**
  * Handle echo command
  * Sends synchronous and asynchronous responses to Slack
+ *
+ * @param message - Worker message from SQS
+ * @param messageId - SQS message ID
+ * @returns Performance metrics for the worker to log
  */
-export async function handleEcho(message: WorkerMessage, messageId: string): Promise<void> {
-  const startTime = Date.now();
+export async function handleEcho(
+  message: WorkerMessage,
+  messageId: string
+): Promise<HandlerResult> {
+  let syncResponseMs: number | undefined;
+  let asyncResponseMs: number | undefined;
 
   // Create child logger with correlation ID for request tracing
   const messageLogger = logger.child(message.correlation_id || messageId, {
@@ -44,14 +60,11 @@ export async function handleEcho(message: WorkerMessage, messageId: string): Pro
       response_type: 'in_channel',
       text: `sync ${message.text}`,
     });
-    const syncDuration = Date.now() - syncStart;
+    syncResponseMs = Date.now() - syncStart;
 
     messageLogger.info('Sync response sent', {
-      duration: syncDuration,
+      duration: syncResponseMs,
     });
-
-    // Simulate some async work
-    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Send asynchronous response
     const asyncStart = Date.now();
@@ -77,19 +90,21 @@ export async function handleEcho(message: WorkerMessage, messageId: string): Pro
         },
       ],
     });
-    const asyncDuration = Date.now() - asyncStart;
+    asyncResponseMs = Date.now() - asyncStart;
 
     messageLogger.info('Async response sent', {
-      duration: asyncDuration,
+      duration: asyncResponseMs,
     });
 
     subsegment?.close();
 
-    const totalDuration = Date.now() - startTime;
+    messageLogger.info('Echo command processed successfully');
 
-    messageLogger.info('Echo command processed successfully', {
-      totalDuration,
-    });
+    // Return performance metrics for the worker to log
+    return {
+      syncResponseMs,
+      asyncResponseMs,
+    };
   } catch (error) {
     subsegment?.addError(error as Error);
     subsegment?.close();

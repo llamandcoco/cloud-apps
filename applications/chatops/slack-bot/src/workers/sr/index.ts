@@ -10,10 +10,42 @@ import { handleEcho } from '../handlers/echo';
 // import { handleHelp } from '../handlers/help';
 
 /**
+ * Log worker performance metrics for monitoring and analysis
+ */
+function logWorkerMetrics(params: {
+  correlationId?: string;
+  command?: string;
+  totalE2eMs?: number;
+  workerDurationMs: number;
+  queueWaitMs?: number;
+  syncResponseMs?: number;
+  asyncResponseMs?: number;
+  success: boolean;
+  errorType?: string;
+  errorMessage?: string;
+}) {
+  logger.info('Performance metrics', {
+    ...params,
+    component: 'sr-worker', // Add component identifier for filtering
+  });
+}
+
+/**
+ * Handler result with performance metrics
+ */
+interface HandlerResult {
+  syncResponseMs?: number;
+  asyncResponseMs?: number;
+}
+
+/**
  * Command handler registry
  * Maps command names to their handler functions
  */
-const COMMAND_HANDLERS: Record<string, (message: WorkerMessage, messageId: string) => Promise<void>> = {
+const COMMAND_HANDLERS: Record<
+  string,
+  (message: WorkerMessage, messageId: string) => Promise<HandlerResult>
+> = {
   '/echo': handleEcho,
   // Add new short-read commands here (no infrastructure changes needed!)
   // '/status': handleStatus,
@@ -35,10 +67,11 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   for (const record of event.Records) {
     const startTime = Date.now();
     let messageLogger = logger;
+    let correlationId: string | undefined;
 
     try {
       const message: WorkerMessage = JSON.parse(record.body);
-      const correlationId = message.correlation_id;
+      correlationId = message.correlation_id;
 
       // Create child logger with correlation ID for request tracing
       messageLogger = logger.child(correlationId || record.messageId, {
@@ -70,21 +103,48 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         throw new Error(errorMsg);
       }
 
-      // Execute handler
-      await handler(message, record.messageId);
+      // Execute handler and get performance metrics
+      const handlerResult = await handler(message, record.messageId);
 
-      const duration = Date.now() - startTime;
+      const totalDuration = Date.now() - startTime;
+      const e2eDuration = message.api_gateway_start_time
+        ? Date.now() - message.api_gateway_start_time
+        : undefined;
+
+      // Log structured performance metrics for CloudWatch Insights analysis
+      logWorkerMetrics({
+        correlationId,
+        command: message.command,
+        totalE2eMs: e2eDuration,
+        workerDurationMs: totalDuration,
+        queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
+        syncResponseMs: handlerResult.syncResponseMs,
+        asyncResponseMs: handlerResult.asyncResponseMs,
+        success: true,
+      });
+
       messageLogger.info('Command processed successfully', {
         command: message.command,
-        duration,
+        duration: totalDuration,
+        e2eDuration,
       });
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      const err = error as Error;
 
-      messageLogger.error('Failed to process command', error as Error, {
+      messageLogger.error('Failed to process command', err, {
         messageId: record.messageId,
         duration,
+      });
+
+      // Log performance metrics even for failures
+      logWorkerMetrics({
+        correlationId,
+        workerDurationMs: duration,
+        success: false,
+        errorType: err.name,
+        errorMessage: err.message,
       });
 
       // Add to failed items for retry
