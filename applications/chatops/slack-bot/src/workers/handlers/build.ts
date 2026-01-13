@@ -194,6 +194,7 @@ export async function handleBuild(message: WorkerMessage, messageId: string): Pr
       messageLogger.error('Failed to send error notification', notifyError as Error);
     }
 
+    // Re-throw to let worker handle the error, but we've already sent a user-facing message
     throw error;
   }
 }

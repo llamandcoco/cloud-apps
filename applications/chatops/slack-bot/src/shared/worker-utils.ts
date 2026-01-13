@@ -26,6 +26,15 @@ export interface WorkerConfig {
 
 /**
  * Log worker performance metrics for monitoring and analysis
+ * 
+ * This function logs structured performance data to CloudWatch for:
+ * - E2E latency tracking (from API Gateway to worker completion)
+ * - Queue wait time analysis
+ * - Sync/async response time breakdown
+ * - Error tracking and categorization
+ * 
+ * @param componentName - Worker component identifier (e.g., 'sr-worker', 'lw-worker')
+ * @param params - Performance metrics to log
  */
 function logWorkerMetrics(
   componentName: string,
