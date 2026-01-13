@@ -20,7 +20,7 @@ export interface WorkerConfig {
   quadrantName: string;   // e.g., 'short-read', 'short-write'
   commandHandlers: Record<
     string,
-    (message: WorkerMessage, messageId: string) => Promise<HandlerResult | void>
+    (message: WorkerMessage, messageId: string) => Promise<HandlerResult>
   >;
 }
 
@@ -109,19 +109,16 @@ export function createUnifiedWorkerHandler(config: WorkerConfig) {
           : undefined;
 
         // Log structured performance metrics for CloudWatch Insights analysis
-        // Only if handler returned performance metrics
-        if (handlerResult && typeof handlerResult === 'object') {
-          logWorkerMetrics(config.componentName, {
-            correlationId,
-            command: message.command,
-            totalE2eMs: e2eDuration,
-            workerDurationMs: totalDuration,
-            queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
-            syncResponseMs: handlerResult.syncResponseMs,
-            asyncResponseMs: handlerResult.asyncResponseMs,
-            success: true,
-          });
-        }
+        logWorkerMetrics(config.componentName, {
+          correlationId,
+          command: message.command,
+          totalE2eMs: e2eDuration,
+          workerDurationMs: totalDuration,
+          queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
+          syncResponseMs: handlerResult.syncResponseMs,
+          asyncResponseMs: handlerResult.asyncResponseMs,
+          success: true,
+        });
 
         messageLogger.info('Command processed successfully', {
           command: message.command,
