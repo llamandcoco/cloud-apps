@@ -1,6 +1,6 @@
 // Shared worker utilities for unified command routing
 
-import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+import { SQSEvent, SQSBatchResponse, SQSRecord } from 'aws-lambda';
 import { logger } from './logger';
 import { WorkerMessage } from './types';
 
@@ -58,6 +58,141 @@ function logWorkerMetrics(
 }
 
 /**
+ * Parse and validate the worker message from SQS record
+ */
+function parseWorkerMessage(record: SQSRecord): WorkerMessage {
+  return JSON.parse(record.body);
+}
+
+/**
+ * Create a child logger with correlation context
+ */
+function createMessageLogger(
+  correlationId: string | undefined,
+  messageId: string,
+  config: WorkerConfig,
+  message: WorkerMessage
+) {
+  return logger.child(correlationId || messageId, {
+    component: config.componentName,
+    command: message.command,
+    userId: message.user_id,
+    quadrant: config.quadrantName,
+  });
+}
+
+/**
+ * Find and validate the command handler
+ */
+function getCommandHandler(
+  message: WorkerMessage,
+  config: WorkerConfig
+): (message: WorkerMessage, messageId: string) => Promise<HandlerResult> {
+  const handler = config.commandHandlers[message.command];
+  
+  if (!handler) {
+    const availableCommands = Object.keys(config.commandHandlers).join(', ');
+    throw new Error(
+      `Unknown command: ${message.command}. Available ${config.quadrantName} commands: ${availableCommands || 'none'}`
+    );
+  }
+  
+  return handler;
+}
+
+/**
+ * Calculate performance metrics
+ */
+function calculatePerformanceMetrics(
+  startTime: number,
+  message: WorkerMessage
+) {
+  const totalDuration = Date.now() - startTime;
+  const e2eDuration = message.api_gateway_start_time
+    ? Date.now() - message.api_gateway_start_time
+    : undefined;
+  const queueWaitMs = e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined;
+
+  return {
+    totalDuration,
+    e2eDuration,
+    queueWaitMs,
+  };
+}
+
+/**
+ * Process a single SQS record
+ */
+async function processRecord(
+  record: SQSRecord,
+  config: WorkerConfig
+): Promise<{ success: boolean; itemIdentifier: string }> {
+  const startTime = Date.now();
+  let messageLogger = logger;
+  let correlationId: string | undefined;
+
+  try {
+    const message = parseWorkerMessage(record);
+    correlationId = message.correlation_id;
+
+    messageLogger = createMessageLogger(correlationId, record.messageId, config, message);
+
+    messageLogger.info('Routing command to handler', {
+      command: message.command,
+      text: message.text,
+      user: message.user_name,
+      messageId: record.messageId,
+    });
+
+    const handler = getCommandHandler(message, config);
+    const handlerResult = await handler(message, record.messageId);
+
+    const { totalDuration, e2eDuration, queueWaitMs } = calculatePerformanceMetrics(
+      startTime,
+      message
+    );
+
+    logWorkerMetrics(config.componentName, {
+      correlationId,
+      command: message.command,
+      totalE2eMs: e2eDuration,
+      workerDurationMs: totalDuration,
+      queueWaitMs,
+      syncResponseMs: handlerResult.syncResponseMs,
+      asyncResponseMs: handlerResult.asyncResponseMs,
+      success: true,
+    });
+
+    messageLogger.info('Command processed successfully', {
+      command: message.command,
+      duration: totalDuration,
+      e2eDuration,
+    });
+
+    return { success: true, itemIdentifier: record.messageId };
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const err = error as Error;
+
+    messageLogger.error('Failed to process command', err, {
+      messageId: record.messageId,
+      duration,
+    });
+
+    logWorkerMetrics(config.componentName, {
+      correlationId,
+      workerDurationMs: duration,
+      success: false,
+      errorType: err.name,
+      errorMessage: err.message,
+    });
+
+    return { success: false, itemIdentifier: record.messageId };
+  }
+}
+
+/**
  * Creates a unified worker handler function configured for a specific component
  * This eliminates code duplication across SR, SW, LR, and LW workers
  */
@@ -71,90 +206,10 @@ export function createUnifiedWorkerHandler(config: WorkerConfig) {
     const batchItemFailures: { itemIdentifier: string }[] = [];
 
     for (const record of event.Records) {
-      const startTime = Date.now();
-      let messageLogger = logger;
-      let correlationId: string | undefined;
-
-      try {
-        const message: WorkerMessage = JSON.parse(record.body);
-        correlationId = message.correlation_id;
-
-        // Create child logger with correlation ID for request tracing
-        messageLogger = logger.child(correlationId || record.messageId, {
-          component: config.componentName,
-          command: message.command,
-          userId: message.user_id,
-          quadrant: config.quadrantName,
-        });
-
-        messageLogger.info('Routing command to handler', {
-          command: message.command,
-          text: message.text,
-          user: message.user_name,
-          messageId: record.messageId,
-        });
-
-        // Find handler for command
-        const handler = config.commandHandlers[message.command];
-
-        if (!handler) {
-          const availableCommands = Object.keys(config.commandHandlers).join(', ');
-          const errorMsg = `Unknown command: ${message.command}. Available ${config.quadrantName} commands: ${availableCommands || 'none'}`;
-
-          messageLogger.error(errorMsg, new Error('Unknown command'), {
-            command: message.command,
-            availableCommands,
-          });
-
-          throw new Error(errorMsg);
-        }
-
-        // Execute handler and get performance metrics
-        const handlerResult = await handler(message, record.messageId);
-
-        const totalDuration = Date.now() - startTime;
-        const e2eDuration = message.api_gateway_start_time
-          ? Date.now() - message.api_gateway_start_time
-          : undefined;
-
-        // Log structured performance metrics for CloudWatch Insights analysis
-        logWorkerMetrics(config.componentName, {
-          correlationId,
-          command: message.command,
-          totalE2eMs: e2eDuration,
-          workerDurationMs: totalDuration,
-          queueWaitMs: e2eDuration ? Math.max(0, e2eDuration - totalDuration) : undefined,
-          syncResponseMs: handlerResult.syncResponseMs,
-          asyncResponseMs: handlerResult.asyncResponseMs,
-          success: true,
-        });
-
-        messageLogger.info('Command processed successfully', {
-          command: message.command,
-          duration: totalDuration,
-          e2eDuration,
-        });
-
-      } catch (error) {
-        const duration = Date.now() - startTime;
-        const err = error as Error;
-
-        messageLogger.error('Failed to process command', err, {
-          messageId: record.messageId,
-          duration,
-        });
-
-        // Log performance metrics even for failures
-        logWorkerMetrics(config.componentName, {
-          correlationId,
-          workerDurationMs: duration,
-          success: false,
-          errorType: err.name,
-          errorMessage: err.message,
-        });
-
-        // Add to failed items for retry
-        batchItemFailures.push({ itemIdentifier: record.messageId });
+      const result = await processRecord(record, config);
+      
+      if (!result.success) {
+        batchItemFailures.push({ itemIdentifier: result.itemIdentifier });
       }
     }
 
