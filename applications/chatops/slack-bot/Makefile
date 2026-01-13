@@ -111,8 +111,8 @@ verify-aws:
 
 # Valid components
 # Quadrant-based workers (new architecture)
-QUADRANT_WORKERS := sr lw
-VALID_COMPONENTS := router sr lw
+QUADRANT_WORKERS := sr lw lr sw
+VALID_COMPONENTS := router sr lw lr sw
 
 build: clean-dist
 	@echo "$(BLUE)Building all Lambda functions...$(NC)"
@@ -136,7 +136,7 @@ upload-%: build-% verify-aws
 	echo "$$UPLOAD_OUTPUT"; \
 	echo "$$UPLOAD_OUTPUT" | grep -o '##VERSION_ID=.*##' | sed 's/##VERSION_ID=//;s/##//' > .s3-version-id-$*.tmp || true
 
-upload-all: upload-router upload-sr upload-lw
+upload-all: upload-router upload-sr upload-lw upload-lr upload-sw
 	@echo "$(GREEN)✓ All quadrant workers uploaded$(NC)"
 
 upload-all-legacy: upload-router upload-deploy upload-status upload-build
@@ -153,12 +153,24 @@ deploy-sr: build-sr
 deploy-lw: build-lw
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
 
+deploy-lr: build-lr
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lr --local
+
+deploy-sw: build-sw
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sw --local
+
 # Explicit -local targets for quadrant workers
 deploy-sr-local: build-sr
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sr --local
 
 deploy-lw-local: build-lw
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lw --local
+
+deploy-lr-local: build-lr
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh lr --local
+
+deploy-sw-local: build-sw
+	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh sw --local
 
 deploy-router-local: build-router
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh router --local
@@ -171,8 +183,8 @@ deploy-build: build-build
 deploy-%: upload-%
 	@VERSION=$(VERSION) SANDBOX_ROOT=$(SANDBOX_ROOT) $(SCRIPTS_DIR)/deploy-component.sh $*
 
-# Deploy all quadrant workers from local (router, sr, lw only)
-deploy-all-local: deploy-router-local deploy-sr-local deploy-lw-local
+# Deploy all quadrant workers from local (router, sr, lw, lr, sw)
+deploy-all-local: deploy-router-local deploy-sr-local deploy-lw-local deploy-lr-local deploy-sw-local
 	@echo "$(GREEN)✓ All quadrant workers deployed from local$(NC)"
 
 # Deploy from S3 with smart version handling

@@ -5,7 +5,7 @@
 #   If omitted, packages all workers
 #
 # Quadrant-based workers:
-#   sr  - Short-Read unified worker (handles /echo, /status, etc.)
+#   sr  - Short-Read unified worker (handles /echo, /status-check, etc.)
 #   lw  - Long-Write unified worker (handles /build, /deploy, etc.)
 
 set -e
@@ -51,8 +51,8 @@ package_lambda() {
     cp -r "$BUILD_DIR/shared"/* "$temp_dir/shared/"
   fi
 
-  # For quadrant workers (sr, lw), also copy handlers
-  if [[ "$name" == "sr-worker" || "$name" == "lw-worker" ]]; then
+  # For quadrant workers (sr, lw, lr, sw), also copy handlers
+  if [[ "$name" == "sr-worker" || "$name" == "lw-worker" || "$name" == "lr-worker" || "$name" == "sw-worker" ]]; then
     if [ -d "$BUILD_DIR/workers/handlers" ]; then
       mkdir -p "$temp_dir/workers/handlers"
       cp -r "$BUILD_DIR/workers/handlers"/* "$temp_dir/workers/handlers/"
@@ -95,6 +95,12 @@ if [ -n "$TARGET_WORKER" ]; then
     lw)
       package_lambda "lw-worker" "$BUILD_DIR/workers/lw"
       ;;
+    lr)
+      package_lambda "lr-worker" "$BUILD_DIR/workers/lr"
+      ;;
+    sw)
+      package_lambda "sw-worker" "$BUILD_DIR/workers/sw"
+      ;;
     deploy)
       package_lambda "deploy-worker" "$BUILD_DIR/workers/deploy"
       ;;
@@ -104,7 +110,7 @@ if [ -n "$TARGET_WORKER" ]; then
     *)
       echo "❌ Unknown worker: $TARGET_WORKER"
       echo "Valid options:"
-        echo "  Quadrant-based: sr, lw"
+        echo "  Quadrant-based: sr, lw, lr, sw"
         echo "  Legacy: router, deploy, status"
       exit 1
       ;;

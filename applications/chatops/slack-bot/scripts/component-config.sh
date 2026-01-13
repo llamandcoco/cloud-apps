@@ -2,7 +2,7 @@
 # Component configuration - Single source of truth for all component mappings
 
 # Valid components list
-export VALID_COMPONENTS="router sr lw"
+export VALID_COMPONENTS="router sr lw lr sw"
 
 # Get zip filename for component
 get_zip_name() {
@@ -10,6 +10,8 @@ get_zip_name() {
     router) echo "router" ;;
     sr) echo "sr-worker" ;;
     lw) echo "lw-worker" ;;
+    lr) echo "lr-worker" ;;
+    sw) echo "sw-worker" ;;
     *) return 1 ;;
   esac
 }
@@ -20,6 +22,8 @@ get_tg_path() {
     router) echo "slack-router-lambda" ;;
     sr) echo "chatbot-command-sr-worker" ;;
     lw) echo "chatbot-command-lw-worker" ;;
+    lr) echo "chatbot-command-lr-worker" ;;
+    sw) echo "chatbot-command-sw-worker" ;;
     *) return 1 ;;
   esac
 }
