@@ -5,6 +5,7 @@ import { logger } from '../../shared/logger';
 import { sendSlackResponse } from '../../shared/slack-client';
 import { WorkerMessage } from '../../shared/types';
 import { getGitHubToken } from '../../shared/secrets';
+import { HandlerResult } from '../../shared/worker-utils';
 
 interface BuildCommand {
   component: string;  // router, sr, lw, deploy, status, all
@@ -101,7 +102,7 @@ async function triggerGitHubWorkflow(params: {
  * Handle build command
  * Triggers GitHub Actions workflow to build and upload Lambda artifacts
  */
-export async function handleBuild(message: WorkerMessage, messageId: string): Promise<void> {
+export async function handleBuild(message: WorkerMessage, messageId: string): Promise<HandlerResult> {
   const startTime = Date.now();
 
   const messageLogger = logger.child(message.correlation_id || messageId, {
@@ -126,6 +127,7 @@ export async function handleBuild(message: WorkerMessage, messageId: string): Pr
     });
 
     // Send immediate acknowledgment
+    const syncStartTime = Date.now();
     await sendSlackResponse(message.response_url, {
       response_type: 'in_channel',
       text: `🔨 Building ${component}...`,
@@ -148,6 +150,7 @@ export async function handleBuild(message: WorkerMessage, messageId: string): Pr
         }
       ]
     });
+    const syncResponseMs = Date.now() - syncStartTime;
 
     // Trigger GitHub Actions workflow
     await triggerGitHubWorkflow({
@@ -163,6 +166,7 @@ export async function handleBuild(message: WorkerMessage, messageId: string): Pr
       environment
     });
 
+    return { syncResponseMs };
   } catch (error) {
     const duration = Date.now() - startTime;
 
@@ -190,6 +194,7 @@ export async function handleBuild(message: WorkerMessage, messageId: string): Pr
       messageLogger.error('Failed to send error notification', notifyError as Error);
     }
 
+    // Re-throw to let worker handle the error, but we've already sent a user-facing message
     throw error;
   }
 }
