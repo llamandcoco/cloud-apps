@@ -54,7 +54,7 @@ scenarios:
           body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/echo&text=performance test {{ $randomNumber(1, 10000) }}&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
           afterResponse: "captureMetrics"
 
-  - name: "Status Command (Medium)"
+  - name: "Check Status Command (Medium)"
     weight: 30
     flow:
       - post:
@@ -62,7 +62,7 @@ scenarios:
           headers:
             Content-Type: "application/x-www-form-urlencoded"
           beforeRequest: "generateSlackSignature"
-          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/status&text=&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
+          body: "token=test&team_id=T123&team_domain=test&channel_id=C123&channel_name=general&user_id=U{{ $randomNumber(1000, 9999) }}&user_name=testuser&command=/check-status&text=&response_url=https://hooks.slack.com/commands/T123/456/token&trigger_id=123.456.abc"
           afterResponse: "captureMetrics"
 
   - name: "Deploy Command (Slow)"

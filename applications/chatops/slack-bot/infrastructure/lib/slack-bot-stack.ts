@@ -73,7 +73,7 @@ export class SlackBotStack extends cdk.Stack {
 
     /**
      * QUADRANT 1: Short + Read
-     * Commands: /status, /health, /metrics, /echo
+     * Commands: /check-status, /health, /metrics, /echo
      * Purpose: Fast queries for system state
      * Permissions: Read-only CloudWatch, Lambda metadata, ECS describe
      * Timeout: ≤30s
@@ -93,7 +93,10 @@ export class SlackBotStack extends cdk.Stack {
         
         // ECS service status (read-only)
         'ecs:DescribeServices',
-        'ecs:DescribeClusters'
+        'ecs:DescribeClusters',
+
+        // Tagging API for resource enumeration
+        'tag:GetResources'
       ],
       resources: ['*'],
       conditions: {

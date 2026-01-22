@@ -149,6 +149,17 @@ cd infrastructure
 sam local invoke CommandHandler -e test-events/slack-command.json
 ```
 
+## Slack Commands
+
+### `/check-status`
+
+- **Signature:** `/check-status env=<env> app=<app> target=<resource-name>` (order of arguments does not matter).
+- **Defaults:** `env=plt`, `app=slack-bot` when arguments are omitted.
+- **Purpose:** Returns a table of tagged resources (ECS services, Lambda functions, DynamoDB tables) filtered by the provided `Environment`/`Application` tag pair, optionally narrowed to a `target` substring.
+- **Output:** Slack response contains a markdown table with resource name, quadrant (ECS/Lambda/DynamoDB), status (up/down plus running vs desired counts or state), and the latest CloudWatch metric (CPUUtilization, Errors, or ConsumedReadCapacityUnits) pulled from the last five minutes.
+
+The command relies on Resource Groups Tagging API lookups (requires `tag:GetResources`) together with the existing read-only CloudWatch/IAM permissions, so it is safe to run frequently for DevSecOps visibility.
+
 ## Security
 
 ### Secret Management

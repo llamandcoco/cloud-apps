@@ -21,7 +21,7 @@ export type CommandCategory = 'short-read' | 'short-write' | 'long-read' | 'long
  * Metadata for a Slack command
  */
 export interface CommandMetadata {
-  /** Command name (e.g., "/status", "/deploy") */
+  /** Command name (e.g., "/check-status", "/deploy") */
   name: string;
   
   /** Execution quadrant */
@@ -48,8 +48,8 @@ export const COMMAND_REGISTRY: Record<string, CommandMetadata> = {
   // SHORT + READ: Fast queries (<30s, read-only)
   // ========================================================================
   
-  '/status': {
-    name: '/status',
+  '/check-status': {
+    name: '/check-status',
     category: 'short-read',
     timeout: 30,
     requiresApproval: false,
@@ -222,7 +222,7 @@ export const COMMAND_REGISTRY: Record<string, CommandMetadata> = {
 /**
  * Get metadata for a specific command
  * 
- * @param commandName - The command name (e.g., "/status")
+ * @param commandName - The command name (e.g., "/check-status")
  * @returns Command metadata or undefined if command not found
  */
 export function getCommandMetadata(commandName: string): CommandMetadata | undefined {
