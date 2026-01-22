@@ -2,9 +2,9 @@
 
 import { createUnifiedWorkerHandler } from '../../shared/worker-utils';
 import { handleEcho } from '../handlers/echo';
+import { handleStatus } from '../handlers/status';
 
 // Import future short-read handlers here
-// import { handleStatus } from '../handlers/status';
 // import { handleHelp } from '../handlers/help';
 
 /**
@@ -16,8 +16,8 @@ export const handler = createUnifiedWorkerHandler({
   quadrantName: 'short-read',
   commandHandlers: {
     '/echo': handleEcho,
+    '/check-status': handleStatus,
     // Add new short-read commands here (no infrastructure changes needed!)
-    // '/status': handleStatus,
     // '/help': handleHelp,
   },
 });

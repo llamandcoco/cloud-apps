@@ -18,7 +18,12 @@
     "ci": "npm run lint && npm run type-check && npm run test:coverage && npm run build"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.490.0",
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/client-ecs": "^3.490.0",
     "@aws-sdk/client-eventbridge": "^3.490.0",
+    "@aws-sdk/client-lambda": "^3.490.0",
+    "@aws-sdk/client-resource-groups-tagging-api": "^3.490.0",
     "@aws-sdk/client-ssm": "^3.490.0",
     "aws-xray-sdk-core": "^3.5.3",
     "axios": "^1.6.5"

@@ -61,7 +61,7 @@ The Artillery test runs through 5 phases:
 Matches realistic usage patterns:
 
 - `/echo` (40%) - Fast command, minimal processing
-- `/status` (30%) - Medium complexity, service checks
+- `/check-status` (30%) - Medium complexity, service checks
 - `/deploy` (20%) - Slower, deployment simulation
 - `/build` (10%) - Slower, GitHub API integration
 

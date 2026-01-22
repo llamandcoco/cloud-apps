@@ -14,7 +14,7 @@ describe('Command Registry', () => {
   describe('COMMAND_REGISTRY', () => {
     test('should contain all expected commands', () => {
       const expectedCommands = [
-        '/status',
+        '/check-status',
         '/health',
         '/metrics',
         '/echo',
@@ -66,10 +66,10 @@ describe('Command Registry', () => {
 
   describe('getCommandMetadata', () => {
     test('should return metadata for valid command', () => {
-      const metadata = getCommandMetadata('/status');
+      const metadata = getCommandMetadata('/check-status');
       
       expect(metadata).toBeDefined();
-      expect(metadata?.name).toBe('/status');
+      expect(metadata?.name).toBe('/check-status');
       expect(metadata?.category).toBe('short-read');
     });
 
@@ -90,7 +90,7 @@ describe('Command Registry', () => {
       });
 
       const commandNames = commands.map(c => c.name);
-      expect(commandNames).toContain('/status');
+      expect(commandNames).toContain('/check-status');
       expect(commandNames).toContain('/health');
       expect(commandNames).toContain('/metrics');
       expect(commandNames).toContain('/echo');
@@ -174,7 +174,7 @@ describe('Command Registry', () => {
       const commandNames = commands.map(c => c.name);
       
       // Read operations should not require approval
-      expect(commandNames).not.toContain('/status');
+      expect(commandNames).not.toContain('/check-status');
       expect(commandNames).not.toContain('/health');
       expect(commandNames).not.toContain('/metrics');
     });
@@ -182,7 +182,7 @@ describe('Command Registry', () => {
 
   describe('isValidCommand', () => {
     test('should return true for valid commands', () => {
-      expect(isValidCommand('/status')).toBe(true);
+      expect(isValidCommand('/check-status')).toBe(true);
       expect(isValidCommand('/deploy')).toBe(true);
       expect(isValidCommand('/echo')).toBe(true);
     });

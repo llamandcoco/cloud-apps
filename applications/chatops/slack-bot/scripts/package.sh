@@ -5,7 +5,7 @@
 #   If omitted, packages all workers
 #
 # Quadrant-based workers:
-#   sr  - Short-Read unified worker (handles /echo, /status-check, etc.)
+#   sr  - Short-Read unified worker (handles /echo, /check-status, etc.)
 #   lw  - Long-Write unified worker (handles /build, /deploy, etc.)
 
 set -e
